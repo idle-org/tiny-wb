@@ -1,6 +1,8 @@
 use clap::Parser;
+use memchr::memmem;
+// use once_cell::sync::OnceCell;
 use serialport::SerialPort;
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -15,14 +17,16 @@ struct Args {
     count: u8,
 }
 
+static EOF: OnceLock<memmem::Finder<'_>> = OnceLock::new();
+
 fn main() {
     let args = Args::parse();
     let ports = serialport::available_ports().expect("No ports found!");
     for p in ports {
         println!("{}", p.port_name);
     }
-    let mut port = serialport::new("/dev/ttyACM0", 115_200)
-        .timeout(Duration::from_millis(2000))
+    let mut port = serialport::new("/dev/ttyACM0", 57600)
+        .timeout(Duration::from_millis(200))
         .open()
         .expect("Failed to open port");
     // println!("{}", send_cmd(&mut port, "0\r"));
@@ -36,21 +40,29 @@ fn send_cmd(port: &mut Box<dyn SerialPort>, command: &str) -> String {
     let output = command.as_bytes();
     port.write(output).expect("Write failed!");
 
+    read_all(port)
+}
+
+fn read_all(port: &mut Box<dyn SerialPort>) -> String {
     let mut serial_buf: Vec<u8> = vec![0; 256];
-    // let res = String::new();
     let mut res = Vec::new();
-    let mut tsi = 0;
+    // let mut tsi = 0;
+    let finder = EOF.get_or_init(|| memmem::Finder::new("ch>"));
     while let Ok(r) = port.read(serial_buf.as_mut_slice()) {
-        println!("{} {:?}", r, serial_buf);
-        tsi += r;
-        res.append(&mut serial_buf.clone());
+        if let Some(pos) = finder.find(&serial_buf) {
+            println!("{} pos:{:?}", r, pos);
+            break;
+        }
+        // let r = memmem::Finder::new("ch>");
+        // tsi += r;
+        res.extend_from_slice(&mut serial_buf[..r]);
     }
-    println!("{} {}", tsi, String::from_utf8(res).expect("Can't convert"));
-    String::from_utf8(serial_buf).expect("Converting to str")
+    // println!("{} {}", tsi, String::from_utf8(res).expect("Can't convert"));
+    String::from_utf8(res).expect("Converting to str")
 }
 
 // First line is discardable as it contains only a repead of sent command
-// Read needs to stop on "ch>"
+// Read needs to stop on "ch>" 99, 104, 62
 // Need to send resume afterward
 // Doc: https://tinysa.org/wiki/pmwiki.php?n=Main.USBInterface
 // Working example: http://athome.kaashoek.com/tinySA/python/
