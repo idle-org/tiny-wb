@@ -31,7 +31,8 @@ fn main() {
         .expect("Failed to open port");
     // println!("{}", send_cmd(&mut port, "0\r"));
     // println!("{}", send_cmd(&mut port, "version\r"));
-    println!("{}", send_cmd(&mut port, "scan 240m 960m 10 11\r"));
+    println!("{}", send_cmd(&mut port, "scan 240m 960m 100 11\r"));
+    // println!("{}", send_cmd(&mut port, "scanraw 240m 960m 1000\r"));
     send_cmd(&mut port, "resume\r");
 }
 
