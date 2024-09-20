@@ -126,22 +126,22 @@ fn wait_sync(duration: u64) {
 
 static START: usize = 240000000;
 static STOP: usize = 959000000;
-static POINTS: usize = 10000; //(STOP - START) * 10;
+static POINTS: usize = 290; //(STOP - START) * 10;
 static INCREMENT: usize = (STOP - START) / POINTS; // 1000/100
 
 /// Scan raw frequencies
 fn scanraw(port: &mut Box<dyn SerialPort>) -> Result<(), TinyError> {
-    let mut f = File::open("b.txt")?;
-    let mut s = String::new();
-    let d = f.read_to_string(&mut s)?;
-    println!("{}", s);
-    let v = hex::decode(&s[..s.len() - 1]).unwrap();
-    println!("{:?}", v);
-    parse_data(v).unwrap();
-    // unsafe { send_raw(port, &format!("scanraw {} {} {}\r", START, STOP, POINTS)) }
-    // wait_sync(50);
-    // read_scanraw(port)?;
-    // wait_sync(100);
+    // let mut f = File::open("b.txt")?;
+    // let mut s = String::new();
+    // let d = f.read_to_string(&mut s)?;
+    // println!("{}", s);
+    // let v = hex::decode(&s[..s.len() - 1]).unwrap();
+    // println!("{:?}", v);
+    // parse_data(v).unwrap();
+    unsafe { send_raw(port, &format!("scanraw {} {} {}\r", START, STOP, POINTS)) }
+    wait_sync(50);
+    read_scanraw(port)?;
+    wait_sync(100);
     Ok(())
 }
 
@@ -159,7 +159,7 @@ fn send_cmd(port: &mut Box<dyn SerialPort>, command: &str, wait: u64) -> String 
 unsafe fn send_raw(port: &mut Box<dyn SerialPort>, command: &str) {
     let output = command.as_bytes();
     println!("Sending: {}", command);
-    port.write(output).expect("Write failed!");
+    let r = port.write(output).expect("Write failed!");
 }
 
 /// Reads from port and tries to convert it to string with loss
@@ -214,8 +214,15 @@ fn parse_data(v: Vec<u8>) -> Result<(), TinyError> {
             for (i, slice) in data.chunks_exact(3).enumerate() {
                 let s: &[u8; 3] = &[slice[0], slice[1], slice[2]];
                 let d = DataPoint::unpack(s).unwrap();
-                // let (x, b1, b2) = (slice[0], slice[1], slice[2]);
-                // println!("{} {} {} -> {}", x, msb, lsb, bytes_to_f64(msb, lsb));
+                let (x, b1, b2) = (slice[0], slice[1], slice[2]);
+                println!(
+                    "{} {} {} -> {} : {}",
+                    x,
+                    b1,
+                    b2,
+                    d.value,
+                    (d.value as f64) / 32. - 256.
+                );
                 // println!("{} -> {}", i * INCREMENT, bytes_to_f64(msb, lsb));
                 // let f = bytes_to_f64(b1, b2);
                 // values.push((msb.reverse_bits() as u16) << 8 | lsb.reverse_bits() as u16);
@@ -224,7 +231,7 @@ fn parse_data(v: Vec<u8>) -> Result<(), TinyError> {
                     out,
                     "{},{}",
                     (i * INCREMENT + START) as f64 / 1000000.,
-                    d.value as f64 / 64. - 128. // bytes_to_f64(b1, b2)
+                    ((d.value >> 0) as f64 / 32. - 128. - 128.) // bytes_to_f64(b1, b2)
                 )?;
             }
             println!(
