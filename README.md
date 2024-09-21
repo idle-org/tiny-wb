@@ -2,6 +2,28 @@
 
 Simple tinySA to Workbench converter
 
+# First window
+> Selection
+
+Starts with the most likely com port selected (last used, then usual suspect, then port 0)
+Enter selects it (in the validation sense)
+Selects the first likely baudrate (same algo)
+Enter selects it
+Selects the validate text box
+
+First selection should be enter, then with L/R U/D (or mouse?) you can change the params
+(P) to select a port (B) to select a baudrate (Enter) to be put on the <Next> selection
+
+# Second window
+> Customisation
+
+Tab/L/R for navigation, Enter to change a parameter
+Starts with <Scan> selected and either (L/R/U/D) to be put on the fields
+
+# Third window
+> Result
+
+Show a progress bar, then show a nice message with a prompt to ask where to save, then exits
 
 # References
 
