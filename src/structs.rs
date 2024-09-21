@@ -16,4 +16,10 @@ pub enum TinyError {
     /// The given file could't be exported
     #[error("Couldn't open the given file")]
     OpenOutput(#[from] std::io::Error),
+    /// Generic TUI initialization error
+    #[error("An error occured while creating the TUI")]
+    TUIInitialization(#[from] color_eyre::Report),
+    /// A runtime error occured
+    #[error("A runtime error occured :\n{0}")]
+    TUIRuntimeError(color_eyre::eyre::Error),
 }
