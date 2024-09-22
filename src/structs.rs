@@ -23,3 +23,12 @@ pub enum TinyError {
     #[error("A runtime error occured :\n{0}")]
     TUIRuntimeError(color_eyre::eyre::Error),
 }
+
+#[allow(missing_docs, clippy::missing_docs_in_private_items)]
+/// The direction the input was received, usefull for menu where R/L U/D give similar results and implementation
+pub(crate) enum InputDirection {
+    Up,
+    Down,
+    Right,
+    Left,
+}
