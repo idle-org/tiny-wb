@@ -5,6 +5,7 @@ use ratatui::{
     buffer::Buffer,
     crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
     layout::{Constraint, Direction, Layout, Rect},
+    prelude::BlockExt,
     style::{
         palette::tailwind::{BLUE, GREEN, SLATE},
         Color, Modifier, Style, Styled, Stylize,
@@ -23,6 +24,7 @@ use std::{
     cmp::min,
     fmt::Pointer,
     iter::Iterator,
+    time::Instant,
 };
 use strum::{EnumCount, EnumIter, EnumProperty};
 use strum::{FromRepr, IntoEnumIterator};
@@ -113,36 +115,35 @@ impl<'a> AppInfo<'a> {
         if let Some(s) = match self.flow_state {
             AppState::InitialConfig(ref r) => {
                 let v = *r as usize;
-                let s = match direction {
+
+                match direction {
                     InputDirection::Right => mright!(v, InitialConfig, SelectedConfig),
                     InputDirection::Left => mleft!(v, InitialConfig, SelectedConfig),
                     _ => None,
-                };
-                self.update_color()?;
-                s
+                }
             }
             AppState::FinalConfig(ref r) => {
                 let v = *r as usize;
-                let s = match direction {
+
+                match direction {
                     InputDirection::Right => mright!(v, FinalConfig, SelectedFinalConfig),
                     InputDirection::Left => mleft!(v, FinalConfig, SelectedFinalConfig),
                     _ => None,
-                };
-                self.update_color()?;
-                s
+                }
             }
             AppState::Popup => None,
             AppState::Finished => None,
         } {
             self.flow_state = s;
         }
+        self.update_color()?;
         Ok(())
     }
 
     /// Put an item a specified color
-    fn change_color(&mut self, list: List<'a>, color: Color) -> Option<List<'a>> {
+    fn change_color(&mut self, name: &'a str, list: List<'a>, color: Color) -> Option<List<'a>> {
         Some(
-            list.block(Block::bordered().border_style(color))
+            list.block(Block::bordered().title(name).border_style(color))
                 .style(Style::default().fg(color)),
         )
     }
@@ -176,9 +177,9 @@ impl<'a> AppInfo<'a> {
                             TinyUIError::UninitializedItemList("Port List", line!(), file!()),
                         )?,
                     );
-                self.menu_items.portlist = self.change_color(p, p_c);
-                self.menu_items.baudlist = self.change_color(b, b_c);
-                self.status_message = format!("{:?}", self.menu_items.portlist);
+                // self.status_message = format!("{:?} p:{:?} {:?} {:?}", Instant::now(), p_c, b_c, c);
+                self.menu_items.portlist = self.change_color("COM Ports", p, p_c);
+                self.menu_items.baudlist = self.change_color("Baudrate", b, b_c);
             }
             AppState::FinalConfig(ref c) => {
                 let (mif_color, maf_color, poi_color) = match self.flow_state {
@@ -479,7 +480,7 @@ impl<'a> AppInfo<'a> {
             .baudlist
             .as_ref()
             .ok_or(TinyUIError::UninitializedItemList("Baud", line!(), file!()))?;
-        self.status_message = format!("{:?} ", self.flow_state);
+        // self.status_message = format!("{:?} ", self.flow_state);
         frame.render_stateful_widget(list_ports, area_ports, &mut self.port_list.state);
         frame.render_stateful_widget(list_baudrates, area_baud, &mut self.baudrate.state);
         frame.render_widget(Paragraph::new(self.status_message.clone()), title_area);
