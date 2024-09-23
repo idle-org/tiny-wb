@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{
         palette::tailwind::{BLUE, GREEN, SLATE},
-        Color, Modifier, Style, Stylize,
+        Color, Modifier, Style, Styled, Stylize,
     },
     symbols,
     text::Line,
@@ -18,11 +18,17 @@ use ratatui::{
     DefaultTerminal, Frame,
 };
 use serialport::SerialPortInfo;
-use std::{cmp::min, fmt::Pointer, iter::Iterator};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    cmp::min,
+    fmt::Pointer,
+    iter::Iterator,
+};
 use strum::{EnumCount, EnumIter, EnumProperty};
 use strum::{FromRepr, IntoEnumIterator};
+use tui_textarea::{Input, Key, TextArea};
 
-use crate::structs::InputDirection;
+use crate::structs::{InputDirection, TinyError, TinyUIError};
 
 /// The header style
 const HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(BLUE.c800);
@@ -41,7 +47,7 @@ const UNSELECTED_COLOR: Color = Color::DarkGray;
 
 /// This struct holds the current state of the app.
 #[derive(Debug)]
-pub(crate) struct AppInfo {
+pub(crate) struct AppInfo<'a> {
     /// Wether the app sould immediately quit
     should_quit: bool,
     /// The list of baudrates
@@ -50,8 +56,8 @@ pub(crate) struct AppInfo {
     port_list: PortList,
     /// State of the configuration, akin to tab or window
     flow_state: AppState,
-    // /// Selected item
-    // item_selected: ItemSelectedState
+    /// The list of menu item generated
+    menu_items: MenuItems<'a>,
     /// A debug message string
     status_message: String,
 }
@@ -82,7 +88,8 @@ impl Default for AppState {
 macro_rules! mright {
     ($v:ident, $cname:ident,$fname:ident) => {
         Some(AppState::$cname(
-            $fname::from_repr(min($v + 1, $fname::COUNT - 1)).unwrap(),
+            $fname::from_repr(min($v + 1, $fname::COUNT - 1))
+                .ok_or(TinyUIError::MenuSelectionError)?,
         ))
     };
 }
@@ -93,36 +100,113 @@ macro_rules! mleft {
         if $v == 0 {
             None
         } else {
-            Some(AppState::$cname($fname::from_repr($v - 1).unwrap()))
+            Some(AppState::$cname(
+                $fname::from_repr($v - 1).ok_or(TinyUIError::MenuSelectionError)?,
+            ))
         }
     };
 }
 
-impl AppInfo {
+impl<'a> AppInfo<'a> {
     /// Goes to the next menu depending on the position in the program
-    fn next_menu(&mut self, direction: InputDirection) {
+    fn next_menu(&mut self, direction: InputDirection) -> Result<(), TinyUIError> {
         if let Some(s) = match self.flow_state {
             AppState::InitialConfig(ref r) => {
                 let v = *r as usize;
-                match direction {
+                let s = match direction {
                     InputDirection::Right => mright!(v, InitialConfig, SelectedConfig),
                     InputDirection::Left => mleft!(v, InitialConfig, SelectedConfig),
                     _ => None,
-                }
+                };
+                self.update_color()?;
+                s
             }
             AppState::FinalConfig(ref r) => {
                 let v = *r as usize;
-                match direction {
+                let s = match direction {
                     InputDirection::Right => mright!(v, FinalConfig, SelectedFinalConfig),
                     InputDirection::Left => mleft!(v, FinalConfig, SelectedFinalConfig),
                     _ => None,
-                }
+                };
+                self.update_color()?;
+                s
             }
             AppState::Popup => None,
             AppState::Finished => None,
         } {
             self.flow_state = s;
         }
+        Ok(())
+    }
+
+    /// Put an item a specified color
+    fn change_color(&mut self, list: List<'a>, color: Color) -> Option<List<'a>> {
+        Some(
+            list.block(Block::bordered().border_style(color))
+                .style(Style::default().fg(color)),
+        )
+    }
+
+    /// Progress in the flow of the program
+    fn next_step(&mut self) {
+        match self.flow_state {
+            AppState::InitialConfig(_) => {
+                self.flow_state = AppState::FinalConfig(SelectedFinalConfig::default())
+            }
+            AppState::FinalConfig(_) => self.flow_state = AppState::Finished,
+            AppState::Popup => todo!(),
+            AppState::Finished => todo!(),
+        }
+    }
+
+    /// Update all the colors
+    fn update_color(&mut self) -> Result<(), TinyUIError> {
+        match self.flow_state {
+            AppState::InitialConfig(ref c) => {
+                let (p_c, b_c) = match c {
+                    SelectedConfig::Baudrate => (UNSELECTED_COLOR, SELECTED_COLOR),
+                    SelectedConfig::Port => (SELECTED_COLOR, UNSELECTED_COLOR),
+                };
+                let (p, b) =
+                    (
+                        self.menu_items.portlist.take().ok_or(
+                            TinyUIError::UninitializedItemList("Port List", line!(), file!()),
+                        )?,
+                        self.menu_items.baudlist.take().ok_or(
+                            TinyUIError::UninitializedItemList("Port List", line!(), file!()),
+                        )?,
+                    );
+                self.menu_items.portlist = self.change_color(p, p_c);
+                self.menu_items.baudlist = self.change_color(b, b_c);
+                self.status_message = format!("{:?}", self.menu_items.portlist);
+            }
+            AppState::FinalConfig(ref c) => {
+                let (mif_color, maf_color, poi_color) = match self.flow_state {
+                    AppState::FinalConfig(SelectedFinalConfig::StartFreq) => {
+                        (SELECTED_COLOR, UNSELECTED_COLOR, UNSELECTED_COLOR)
+                    }
+                    AppState::FinalConfig(SelectedFinalConfig::FinalFreq) => {
+                        (UNSELECTED_COLOR, SELECTED_COLOR, UNSELECTED_COLOR)
+                    }
+                    AppState::FinalConfig(SelectedFinalConfig::Points) => {
+                        (UNSELECTED_COLOR, UNSELECTED_COLOR, SELECTED_COLOR)
+                    }
+                    _ => unreachable!(),
+                };
+
+                // let (mif_menu, maf_menu, poi_menu) = (
+                //     self.menu_items.min_frequency.take()?,
+                //     self.menu_items.max_frequency.take()?,
+                //     self.menu_items.points.take()?,
+                // );
+                // self.change_color(mif_menu, mif_color);
+                // self.change_color(maf_menu, maf_color);
+                // self.change_color(poi_menu, poi_color);
+            }
+            AppState::Popup => todo!(),
+            AppState::Finished => todo!(),
+        }
+        Ok(())
     }
 }
 
@@ -161,21 +245,6 @@ impl Default for SelectedFinalConfig {
         Self::StartFreq
     }
 }
-
-// impl SelectedFinalConfig {
-//     fn change_menu(&mut self, direction: InputDirection) {
-//         match direction {
-//             InputDirection::Right => match self {
-//                 SelectedFinalConfig::StartFreq => Self::FinalFreq,
-//                 SelectedFinalConfig::FinalFreq => Self::Points,
-//                 SelectedFinalConfig::Points => Self::Proceed,
-//                 SelectedFinalConfig::Proceed => (),
-//             },
-//             InputDirection::Left => todo!(),
-//             _ => (),
-//         }
-//     }
-// }
 
 /// The list of all baudrates selectables
 #[derive(Debug)]
@@ -255,7 +324,6 @@ impl PortList {
     }
 
     /// Convert the list of ports
-    // TODO: Remove the clone part
     fn to_vecstr(&self) -> Vec<String> {
         self.ports.clone()
     }
@@ -270,6 +338,20 @@ impl PortList {
     }
 }
 
+#[derive(Debug, Default)]
+/// The static list of all menu items
+struct MenuItems<'a> {
+    /// List of port items
+    portlist: Option<List<'a>>,
+    /// List of port items
+    baudlist: Option<List<'a>>,
+}
+
+// impl<'a> Default for MenuItems<'a> {
+//     fn default() -> Self {
+//         Self { portlist: None }
+//     }
+// }
 /// Try to guess the best port to preselect
 fn find_best_port(ports: &[String]) -> usize {
     let best_ports = ["/dev/ttyACM0", "COM3", "COM5", "/dev/ttyS16"];
@@ -281,7 +363,7 @@ fn find_best_port(ports: &[String]) -> usize {
     0
 }
 
-impl AppInfo {
+impl<'a> AppInfo<'a> {
     /// Create a new app with the port info available
     pub(crate) fn new(info: Vec<SerialPortInfo>) -> Self {
         Self {
@@ -290,35 +372,38 @@ impl AppInfo {
             port_list: PortList::from_serial(info),
             flow_state: AppState::default(),
             status_message: String::new(),
+            menu_items: MenuItems::default(),
         }
     }
 
     /// Handle keys while in the first menu
-    fn handle_start_keys(&mut self, key: KeyEvent) {
+    fn handle_start_keys(&mut self, key: KeyEvent) -> Result<(), TinyUIError> {
         if key.kind != KeyEventKind::Press {
-            return;
+            return Ok(());
         }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             KeyCode::Char('j') | KeyCode::Down => self.change_cursor_position(InputDirection::Down),
             KeyCode::Char('k') | KeyCode::Up => self.change_cursor_position(InputDirection::Up),
-            KeyCode::Char('h') | KeyCode::Left => self.next_menu(InputDirection::Left),
-            KeyCode::Char('l') | KeyCode::Right => self.next_menu(InputDirection::Right),
+            KeyCode::Char('h') | KeyCode::Left => self.next_menu(InputDirection::Left)?,
+            KeyCode::Char('l') | KeyCode::Right => self.next_menu(InputDirection::Right)?,
             // KeyCode::Char('g') | KeyCode::Home => self.select_first(),
             // KeyCode::Char('G') | KeyCode::End => self.select_last(),
-            // KeyCode::Enter => {
-            //     self.toggle_status();
-            // }
+            KeyCode::Enter => {
+                self.next_step();
+            }
             _ => {}
         }
+        Ok(())
     }
 
     /// Contains the main loop for running the app
     pub(crate) fn run(&mut self, mut terminal: DefaultTerminal) -> Result<()> {
+        self.init_config();
         loop {
-            terminal.draw(|v| self.draw_config(v))?;
+            terminal.draw(|v| self.draw(v).inspect_err(|e| panic!("{}", e)).unwrap())?;
             if let Event::Key(key) = event::read()? {
-                self.handle_start_keys(key);
+                self.handle_start_keys(key)?;
             };
             if self.should_quit {
                 break;
@@ -327,19 +412,53 @@ impl AppInfo {
         Ok(())
     }
 
+    /// Generic draw loop method
+    fn draw(&mut self, frame: &mut Frame<'_>) -> Result<(), TinyUIError> {
+        match self.flow_state {
+            AppState::InitialConfig(_) => self.draw_config(frame),
+            AppState::FinalConfig(_) => self.draw_final_config(frame),
+            // AppState::Popup => todo!(),
+            // AppState::Finished => todo!(),
+            _ => todo!(),
+        }
+    }
     /// Initialisation of the config window
     fn init_config(&mut self) {
-        // self.flow_state = AppState::InitialConfig();
+        // self.menu_items.baudlist.new()
+        let (b_color, p_color) = match self.flow_state {
+            AppState::InitialConfig(SelectedConfig::Port) => (UNSELECTED_COLOR, SELECTED_COLOR),
+            AppState::InitialConfig(SelectedConfig::Baudrate) => (SELECTED_COLOR, UNSELECTED_COLOR),
+            _ => unreachable!(),
+        };
+        self.menu_items.portlist = Some(
+            List::new(self.port_list.to_vecstr())
+                .block(Block::bordered().title("COM Ports").border_style(p_color))
+                .style(Style::default().fg(p_color))
+                .highlight_style(
+                    Style::default()
+                        .add_modifier(Modifier::ITALIC)
+                        .bg(Color::Blue),
+                )
+                .repeat_highlight_symbol(true),
+        );
+        self.menu_items.baudlist = Some(
+            List::new(self.baudrate.to_vecstr())
+                .block(Block::bordered().title("Baudrates").border_style(b_color))
+                .style(Style::default().fg(b_color))
+                .highlight_style(
+                    Style::default()
+                        .add_modifier(Modifier::ITALIC)
+                        .bg(Color::Blue),
+                )
+                .repeat_highlight_symbol(true),
+        );
     }
 
     /// Draw the config info
-    // TODO: This config doesn't need to be reinit every frame
-    fn draw_config(&mut self, frame: &mut Frame) {
+    fn draw_config(&mut self, frame: &mut Frame) -> Result<(), TinyUIError> {
         let [title_area, main_area, status_area] = Layout::vertical([
             Constraint::Length(2),
             Constraint::Min(10),
-            // Constraint::Min(8),
-            // Constraint::Length(3),
             Constraint::Length(1),
         ])
         .areas(frame.area());
@@ -350,36 +469,79 @@ impl AppInfo {
             Constraint::Min(7),
         ])
         .areas(main_area);
-        let (b_color, p_color) = match self.flow_state {
-            AppState::InitialConfig(SelectedConfig::Port) => (UNSELECTED_COLOR, SELECTED_COLOR),
-            AppState::InitialConfig(SelectedConfig::Baudrate) => (SELECTED_COLOR, UNSELECTED_COLOR),
-            _ => unreachable!(),
-        };
-        let list_ports = List::new(self.port_list.to_vecstr())
-            .block(Block::bordered().title("COM Ports").border_style(p_color))
-            .style(Style::default().fg(p_color))
-            .highlight_style(
-                Style::default()
-                    .add_modifier(Modifier::ITALIC)
-                    .bg(Color::Blue),
-            )
-            .repeat_highlight_symbol(true);
-        let list_baudrates = List::new(self.baudrate.to_vecstr())
-            .block(Block::bordered().title("Baudrates").border_style(b_color))
-            .style(Style::default().fg(b_color))
-            .highlight_style(
-                Style::default()
-                    .add_modifier(Modifier::ITALIC)
-                    .bg(Color::Blue),
-            )
-            .repeat_highlight_symbol(true);
+        let list_ports = self
+            .menu_items
+            .portlist
+            .as_ref()
+            .ok_or(TinyUIError::UninitializedItemList("Port", line!(), file!()))?;
+        let list_baudrates = self
+            .menu_items
+            .baudlist
+            .as_ref()
+            .ok_or(TinyUIError::UninitializedItemList("Baud", line!(), file!()))?;
         self.status_message = format!("{:?} ", self.flow_state);
         frame.render_stateful_widget(list_ports, area_ports, &mut self.port_list.state);
         frame.render_stateful_widget(list_baudrates, area_baud, &mut self.baudrate.state);
         frame.render_widget(Paragraph::new(self.status_message.clone()), title_area);
-        self.render_footer(frame, status_area)
+        self.render_footer(frame, status_area);
+        Ok(())
     }
 
+    /// Draw the final configuration labels
+    fn draw_final_config(&mut self, frame: &mut Frame<'_>) -> Result<(), TinyUIError> {
+        let [title_area, main_area, _, status_area] = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .areas(frame.area());
+        let [_, area_minf, area_maxf, area_points, _] = Layout::horizontal([
+            Constraint::Min(7),
+            Constraint::Percentage(30),
+            Constraint::Percentage(30),
+            Constraint::Percentage(30),
+            Constraint::Min(7),
+        ])
+        .areas(main_area);
+        let (mif_color, maf_color, poi_color) = match self.flow_state {
+            AppState::FinalConfig(SelectedFinalConfig::StartFreq) => {
+                (SELECTED_COLOR, UNSELECTED_COLOR, UNSELECTED_COLOR)
+            }
+            AppState::FinalConfig(SelectedFinalConfig::FinalFreq) => {
+                (UNSELECTED_COLOR, SELECTED_COLOR, UNSELECTED_COLOR)
+            }
+            AppState::FinalConfig(SelectedFinalConfig::Points) => {
+                (UNSELECTED_COLOR, UNSELECTED_COLOR, SELECTED_COLOR)
+            }
+            _ => unreachable!(),
+        };
+
+        self.status_message = format!("{:?} ", self.flow_state);
+        frame.render_widget(
+            Paragraph::new("Fin")
+                .block(Block::bordered())
+                .style(mif_color),
+            area_minf,
+        );
+        frame.render_widget(
+            Paragraph::new("Fin")
+                .block(Block::bordered())
+                .style(maf_color),
+            area_maxf,
+        );
+        frame.render_widget(
+            Paragraph::new("Fin")
+                .block(Block::bordered())
+                .style(poi_color),
+            area_points,
+        );
+
+        // frame.render_stateful_widget(list_baudrates, area_baud, &mut self.baudrate.state);
+        frame.render_widget(Paragraph::new(self.status_message.clone()), title_area);
+        self.render_footer(frame, status_area);
+        Ok(())
+    }
     /// Render the selection footer
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         frame.render_widget(
@@ -391,22 +553,37 @@ impl AppInfo {
         );
     }
 
+    /// Draw the popup for frequency input
+    fn draw_freq_popup(&self) {
+        // self.popup = SelectedFinalConfig::StartFreq;
+        let mut textarea = TextArea::default();
+        textarea.set_block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::LightBlue))
+                .title("Crossterm Popup Example"),
+        );
+
+        let area = Rect {
+            width: 40,
+            height: 5,
+            x: 5,
+            y: 5,
+        };
+        textarea.set_style(Style::default().fg(Color::Yellow));
+        textarea.set_placeholder_style(Style::default());
+        textarea.set_placeholder_text("prompt message");
+    }
+
     /// A directionnal input was received
     fn change_cursor_position(&mut self, direction: InputDirection) {
-        //Where in the menus are we
         match self.flow_state {
-            AppState::InitialConfig(ref selected_menu) => {
-                // self.status_message = format!(
-                //     "{:?} {:?} {:?}",
-                //     selected_menu, self.baudrate.state, self.port_list.state
-                // );
-                match selected_menu {
-                    SelectedConfig::Baudrate => self.baudrate.change_cursor(direction),
-                    SelectedConfig::Port => self.port_list.change_cursor(direction),
-                }
-            }
+            AppState::InitialConfig(ref selected_menu) => match selected_menu {
+                SelectedConfig::Baudrate => self.baudrate.change_cursor(direction),
+                SelectedConfig::Port => self.port_list.change_cursor(direction),
+            },
             AppState::FinalConfig(ref selected_menu) => match selected_menu {
-                SelectedFinalConfig::StartFreq => todo!(),
+                SelectedFinalConfig::StartFreq => self.draw_freq_popup(),
                 SelectedFinalConfig::FinalFreq => todo!(),
                 SelectedFinalConfig::Points => todo!(),
             },
@@ -414,26 +591,13 @@ impl AppInfo {
             AppState::Finished => (),
         }
     }
-
-    // /// Change the selected menu
-    // fn change_menu(&mut self, direction: InputDirection) {
-    //     match self.flow_state {
-    //         AppState::InitialConfig(ref menu) => self,
-    //         AppState::FinalConfig(_) => todo!(),
-    //         AppState::Popup => (),
-    //         AppState::Finished => (),
-    //     }
-    // } // Handle code after validation
 }
 
-#[allow(clippy::missing_docs_in_private_items)]
-impl AppInfo {}
-
-#[allow(clippy::missing_docs_in_private_items)]
-const fn alternate_colors(i: usize) -> Color {
-    if i % 2 == 0 {
-        NORMAL_ROW_BG
-    } else {
-        ALT_ROW_BG_COLOR
-    }
-}
+// #[allow(clippy::missing_docs_in_private_items)]
+// const fn alternate_colors(i: usize) -> Color {
+//     if i % 2 == 0 {
+//         NORMAL_ROW_BG
+//     } else {
+//         ALT_ROW_BG_COLOR
+//     }
+// }

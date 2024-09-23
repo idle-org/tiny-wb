@@ -125,9 +125,9 @@ fn scanraw(port: &mut Box<dyn SerialPort>) -> Result<(), TinyError> {
     // let mut s = String::new();
     // let d = f.read_to_string(&mut s)?;
     // println!("{}", s);
-    // let v = hex::decode(&s[..s.len() - 1]).unwrap();
+    // let v = hex::decode(&s[..s.len() - 1]).?();
     // println!("{:?}", v);
-    // parse_data(v).unwrap();
+    // parse_data(v)?;
     unsafe { send_raw(port, &format!("scanraw {} {} {}\r", START, STOP, POINTS)) }
     wait_sync(SHORT_WAIT);
     read_scanraw(port)?;
@@ -194,7 +194,7 @@ pub fn parse_data(v: Vec<u8>) -> Result<(), TinyError> {
             let data = &v[begining + 1..end];
             for (i, slice) in data.chunks_exact(3).enumerate() {
                 let s: &[u8; 3] = &[slice[0], slice[1], slice[2]];
-                let d = DataPoint::unpack(s).unwrap();
+                let d = DataPoint::unpack(s)?;
                 // println!(
                 //     "{} {} {} -> {} : {}",
                 //     x,

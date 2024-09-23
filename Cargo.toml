@@ -16,3 +16,14 @@ ratatui = "0.28.1"
 serialport = "4.5.0"
 strum = { version = "0.26.3", features = ["derive"] }
 thiserror = "1.0.63"
+tui-textarea = "0.6.1"
+
+[profile.release]
+opt-level = "z"
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+debug = 0

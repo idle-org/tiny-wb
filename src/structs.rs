@@ -22,6 +22,10 @@ pub enum TinyError {
     /// A runtime error occured
     #[error("A runtime error occured :\n{0}")]
     TUIRuntimeError(color_eyre::eyre::Error),
+
+    /// An error occured while trying to parse the result
+    #[error("An error occured while trying to parse the result")]
+    TUIPackingError(#[from] packed_struct::PackingError),
 }
 
 #[allow(missing_docs, clippy::missing_docs_in_private_items)]
@@ -32,3 +36,25 @@ pub(crate) enum InputDirection {
     Right,
     Left,
 }
+
+/// All implementation of errors happening while in the UI
+#[derive(Error, Debug)]
+pub enum TinyUIError {
+    /// An error due to bad menuing implementation
+    #[error("An error occured while selecting a menu item")]
+    MenuSelectionError,
+
+    /// An error due to bad initialization
+    #[error("The item list ({0}) wasn't initialyzed ({2}:{1})")]
+    UninitializedItemList(&'static str, u32, &'static str),
+
+    /// An error occured while proccesing the key events
+    #[error("An error occured while proccesing the key events")]
+    KeyPress(#[from] std::io::Error),
+}
+
+// impl TinyUIError {
+//     pub(crate) fn uninitialized_item_list_error(list: &'static str) -> Self {
+//         Self::UninitializedItemList(list, line!(), file!())
+//     }
+// }
