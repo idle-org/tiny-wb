@@ -8,10 +8,11 @@
 mod scan;
 mod structs;
 mod ui;
+mod ui_struct;
 
 use color_eyre::Result;
 use structs::TinyError;
-use ui::AppInfo;
+use ui_struct::AppInfo;
 
 fn main() -> Result<(), TinyError> {
     // let args = Args::parse();

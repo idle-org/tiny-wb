@@ -1,9 +1,9 @@
 //! The "lib" used for all scan related functions
 
 /// The default start value for a scan
-static START: usize = 240000000;
+static START: usize = 240_000_000;
 /// The default stop value for a scan
-static STOP: usize = 959000000;
+static STOP: usize = 959_000_000;
 /// The default number of points
 static POINTS: usize = 290; //(STOP - START) * 10;
 /// The default increment (deduced from the number of points)
