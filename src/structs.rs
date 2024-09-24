@@ -6,9 +6,10 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use strum::IntoEnumIterator;
 use thiserror::Error;
 
-use crate::ui_struct::AppInfo;
+use crate::ui_struct::{AppInfo, BaudRate};
 
 /// The most common error, exposed to the lib user and end used
 #[derive(Error, Debug)]
@@ -43,6 +44,13 @@ pub enum TinyError {
     /// The config file couldn't be parsed as a valid toml
     #[error("The config config.toml couldn't be written")]
     InvalidDataForConfig(#[from] toml::ser::Error),
+    /// The version couldn't be acquired, likely a bogus connection
+    #[error("Couldn't acquire the version of the device connected to the specified port")]
+    NoVersionFound,
+    /// The given scan frequencies are incorrect
+    // TODO: Expand
+    #[error("The given scan frequencies are inccorect")]
+    BadScanFrequencies,
 }
 
 #[allow(missing_docs, clippy::missing_docs_in_private_items)]
@@ -109,10 +117,13 @@ impl SavedConfig {
     /// Save the config with all runtime parameters
     pub(crate) fn save(arg: &AppInfo) -> Result<(), TinyUIError> {
         let mut f = File::create("config.toml")?;
+        // TODO: Prone to failure
         f.write_all(
             toml::to_string(&Self {
                 port: arg.port_list.selected_port(),
-                baudrate: arg.baudrate.state.selected().unwrap(),
+                baudrate: BaudRate::iter()
+                    .nth(arg.baudrate.state.selected().unwrap())
+                    .unwrap() as usize,
                 start_frequency: arg.start_frequency.int_to_usize(),
                 stop_frequency: arg.stop_frequency.int_to_usize(),
                 points: arg.points.int_to_usize(),
@@ -122,4 +133,21 @@ impl SavedConfig {
         )?;
         Ok(())
     }
+}
+
+/// The various status the connection can take
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ConnectionStatus {
+    /// The connection was created with no initialisation data
+    Uninitialised,
+    // /// The connection has initialisation data but wasn't established
+    // Initialised,
+    // /// The connection was established
+    // Connected,
+    /// The connection coudn't be done, with a string explaining the error
+    ConnectionFailure,
+    /// The connection is closed and the connection was a succes
+    ClosedWithSuccess,
+    // /// The connection is closed with a failure
+    // ClosedWithError,
 }

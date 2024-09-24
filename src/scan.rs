@@ -53,12 +53,13 @@ pub(crate) fn scan_with_progress(
     stop: usize,
     points: usize,
 ) -> Result<(), TinyError> {
+    // TODO: Pass the connection status mutex to advance it
     *scan_message.lock().unwrap() = "Oppening connection".to_string();
     let port = serialport::new(port, 115_200)
         .timeout(Duration::from_millis(3000))
         .open(); // .expect("Failed to open port");
     if let Err(e) = port {
-        *scan_message.lock().unwrap() = "Noo".to_string();
+        // *scan_message.lock().unwrap() = "Noo".to_string();
         return Err(TinyError::PortConnection(e));
     }
     let mut port = port.unwrap();
@@ -70,6 +71,10 @@ pub(crate) fn scan_with_progress(
     *scan_message.lock().unwrap() = "Acquiring version & info".to_string();
     let v = send_cmd(&mut port, "version\r", SHORT_WAIT);
     let i = send_cmd(&mut port, "info\r", SHORT_WAIT);
+    // TODO: have a more thourough version check
+    if v.is_empty() || i.is_empty() {
+        return Err(TinyError::NoVersionFound);
+    }
     *scan_info.lock().unwrap() = format!("{}{}", v, i);
 
     *progress.lock().unwrap() = 16;
@@ -77,12 +82,18 @@ pub(crate) fn scan_with_progress(
     send_cmd(&mut port, &format!("zero {}\r", OFFSET), SHORT_WAIT);
 
     *progress.lock().unwrap() = 17;
-    *scan_message.lock().unwrap() = "Setting up scan & mode".to_string();
+    *scan_message.lock().unwrap() = "Setting up marker".to_string();
     send_cmd(&mut port, "marker\r", SHORT_WAIT);
     send_cmd(&mut port, "pause\r", SHORT_WAIT);
-    send_cmd(&mut port, "mode high input\r", SHORT_WAIT);
 
     *progress.lock().unwrap() = 18;
+    *scan_message.lock().unwrap() = "Setting up scan & mode".to_string();
+    // return Err(TinyError::ConfigNotFound);
+    // panic!();
+    let mode = mode_from(start, stop)?;
+    send_cmd(&mut port, &format!("mode {} input\r", mode), SHORT_WAIT);
+
+    *progress.lock().unwrap() = 19;
     *scan_message.lock().unwrap() = "Setting up sweep".to_string();
     send_cmd(&mut port, &format!("sweep start {}\r", START), SHORT_WAIT);
     send_cmd(&mut port, &format!("sweep stop {}\r", STOP), SHORT_WAIT);
@@ -112,6 +123,19 @@ pub(crate) fn scan_with_progress(
     wait_sync(LONG_WAIT);
     *progress.lock().unwrap() = 100;
     Ok(())
+}
+
+/// Get the mode of operation from the start & stop scan values
+fn mode_from(start: usize, stop: usize) -> Result<String, TinyError> {
+    // TODO: Switch to low if possible with another non overlaping pattern
+    if start > stop {
+        return Err(TinyError::BadScanFrequencies);
+    }
+    match (start, stop) {
+        (240_000_000..=960_000_000, 240_000_000..=960_000_000) => Ok("high".to_string()),
+        (0..240_000_000, 0..240_000_000) => Ok("low".to_string()),
+        _ => Err(TinyError::BadScanFrequencies),
+    }
 }
 
 /// A (lame) function used for initialisation:

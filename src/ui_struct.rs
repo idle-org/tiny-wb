@@ -15,7 +15,7 @@ use std::{
 use strum::{EnumCount, EnumIter};
 use strum::{FromRepr, IntoEnumIterator};
 
-use crate::structs::{InputDirection, SavedConfig, TinyError, TinyUIError};
+use crate::structs::{ConnectionStatus, InputDirection, SavedConfig, TinyError, TinyUIError};
 
 /// Color of a selected border
 pub(crate) const SELECTED_COLOR: Color = Color::White;
@@ -51,7 +51,10 @@ pub(crate) struct AppInfo<'a> {
     pub(crate) scan_message: Arc<Mutex<String>>,
     /// Return scan data
     pub(crate) return_data: Arc<Mutex<Vec<(f64, f64)>>>,
+    /// Connection status, allow for a simple mutex bypass
+    pub(crate) connection_status: Arc<Mutex<ConnectionStatus>>,
 }
+
 #[derive(Debug)]
 pub(crate) struct UIUsize {
     /// Current value held by the usize
