@@ -11,15 +11,14 @@ mod ui;
 mod ui_struct;
 
 use color_eyre::Result;
+// use human_panic::setup_panic;
 use structs::TinyError;
 use ui_struct::AppInfo;
 
 fn main() -> Result<(), TinyError> {
-    // let args = Args::parse();
-    // scan()
-
     color_eyre::install()?;
     let terminal = ratatui::init();
+    // setup_panic!();
     let ports = serialport::available_ports()?;
     let app_r = AppInfo::new(ports).run(terminal);
 

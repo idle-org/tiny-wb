@@ -78,7 +78,7 @@ pub(crate) struct AppInfo<'a> {
     /// The number of points
     pub(crate) points: UIUsize,
     /// Global progress
-    pub(crate) progress: Arc<Mutex<f64>>,
+    pub(crate) progress: Arc<Mutex<usize>>,
     /// Global initialisation data
     pub(crate) scan_info: Arc<Mutex<String>>,
     /// Global message
@@ -136,8 +136,8 @@ pub(crate) enum AppState {
     InitialConfig(SelectedConfig),
     /// Final config, frequencies and points
     FinalConfig(SelectedFinalConfig),
-    /// Popup for text entering
-    Popup,
+    /// The end window for confirmation
+    EndWindow,
     /// Save window
     Finished,
 }
@@ -324,6 +324,7 @@ pub(crate) struct MenuItems<'a> {
 
 /// Try to guess the best port to preselect
 fn find_best_port(ports: &[String]) -> usize {
+    // TODO: Try to load from disk then save to disk
     let best_ports = ["/dev/ttyACM0", "COM3", "COM5", "/dev/ttyS16"];
     for port in best_ports {
         if let Some(p) = ports.iter().position(|v| v == port) {
@@ -347,6 +348,7 @@ impl<'a> AppInfo<'a> {
         )
     }
 }
+
 impl<'a> AppInfo<'a> {
     /// Update all the colors
     pub(crate) fn update_color(&mut self) -> Result<(), TinyUIError> {
@@ -369,30 +371,9 @@ impl<'a> AppInfo<'a> {
                 self.menu_items.portlist = self.change_color("COM Ports", p, p_c);
                 self.menu_items.baudlist = self.change_color("Baudrate", b, b_c);
             }
-            AppState::FinalConfig(ref c) => {
-                // self.status_message = format!("Moo");
-                // let colorlist = match c {
-                //     SelectedFinalConfig::StartFreq => {
-                //         [SELECTED_COLOR, UNSELECTED_COLOR, UNSELECTED_COLOR]
-                //     }
-                //     SelectedFinalConfig::FinalFreq => {
-                //         [UNSELECTED_COLOR, SELECTED_COLOR, UNSELECTED_COLOR]
-                //     }
-                //     SelectedFinalConfig::Points => {
-                //         [UNSELECTED_COLOR, UNSELECTED_COLOR, SELECTED_COLOR]
-                //     }
-                // };
-
-                // for (area, color) in self.menu_items.textboxes.iter_mut().zip(colorlist) {
-                //     .block(
-                //         Block::default()
-                //             // .borders(Borders::ALL)
-                //             .style(Style::default().fg(Color::Blue)), // .title(" Inactive (^X to switch) "),
-                //     )
-                // }
-            }
-            AppState::Popup => todo!(),
-            AppState::Finished => todo!(),
+            // TODO: Have all color update here
+            AppState::FinalConfig(_selected_final_config) => (),
+            _ => (),
         }
         Ok(())
     }

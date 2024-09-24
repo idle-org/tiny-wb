@@ -2,24 +2,25 @@
 #![allow(unused_imports)]
 use clap::builder::Resettable;
 use color_eyre::{owo_colors::OwoColorize, Section};
-use core::time;
+use core::{panic, time};
 use ratatui::{
     buffer::Buffer,
     crossterm::{
         event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
         style::Print,
     },
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     prelude::BlockExt,
     style::{
         palette::tailwind::{BLUE, GREEN, SLATE},
         Color, Modifier, Style, Styled, Stylize,
     },
-    symbols,
+    symbols::{self, Marker},
     text::Line,
     widgets::{
-        Block, Borders, HighlightSpacing, LineGauge, List, ListDirection, ListItem, ListState,
-        Padding, Paragraph, ScrollDirection, StatefulWidget, Widget, Wrap,
+        block::Title, Axis, Block, Borders, Chart, Dataset, GraphType, HighlightSpacing, LineGauge,
+        List, ListDirection, ListItem, ListState, Padding, Paragraph, ScrollDirection,
+        StatefulWidget, Widget, Wrap,
     },
     DefaultTerminal, Frame,
 };
@@ -59,7 +60,7 @@ impl<'a> AppInfo<'a> {
             start_frequency: UIUsize::new(240, 10, 960),
             stop_frequency: UIUsize::new(960, 10, 960),
             points: UIUsize::new(10000, 100, 1000000),
-            progress: Arc::new(Mutex::new(0.)),
+            progress: Arc::new(Mutex::new(0)),
             scan_info: Arc::new(Mutex::new(String::new())),
             scan_message: Arc::new(Mutex::new(String::new())),
         }
@@ -91,9 +92,9 @@ impl<'a> AppInfo<'a> {
         match self.flow_state {
             AppState::InitialConfig(_) => self.draw_config(frame),
             AppState::FinalConfig(_) => self.draw_final_config(frame),
-            // AppState::Popup => todo!(),
             AppState::Finished => self.draw_progress(frame),
-            _ => todo!(),
+            AppState::EndWindow => self.draw_end_window(frame),
+            // _ => unimplemented!(),
         }
     }
 
@@ -126,6 +127,11 @@ impl<'a> AppInfo<'a> {
     fn init_final_config(&mut self) -> Result<(), TinyUIError> {
         self.menu_items.textboxes = vec![Paragraph::new("")];
         self.update_color()
+    }
+
+    /// Initialisation of all the final ui elements
+    pub(crate) fn init_end(&self) -> Result<(), TinyUIError> {
+        Ok(())
     }
 
     /// Draw the final configuration labels
@@ -209,60 +215,6 @@ impl<'a> AppInfo<'a> {
         Ok(())
     }
 
-    /// Draw the progress, updates as the progress is being done
-    fn draw_progress(&mut self, frame: &mut Frame<'_>) -> Result<(), TinyUIError> {
-        // let title = title_block("Blue / red only background");
-
-        let [_, main_s, _] = Layout::horizontal([
-            Constraint::Min(7),
-            Constraint::Percentage(90),
-            Constraint::Min(7),
-        ])
-        .areas(frame.area());
-        let [title_area, _, main_area, _, progress_area] = Layout::vertical([
-            Constraint::Length(3),
-            // Constraint::Length(1),
-            Constraint::Length(1),
-            // Constraint::Length(1),
-            Constraint::Min(10),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
-        .areas(main_s);
-        let (pb, status, message) = {
-            let status = self.scan_message.try_lock().unwrap();
-            let status = Paragraph::new(status.clone())
-                .block(Block::bordered().title("Operation"))
-                .style(SELECTED_COLOR);
-            let message = self.scan_info.try_lock().unwrap();
-            let message = Paragraph::new(message.clone())
-                .block(Block::bordered().title("TinySA Info"))
-                .style(SELECTED_COLOR);
-            let progress = self.progress.try_lock().unwrap();
-
-            let pb = self
-                .menu_items
-                .progress_bar
-                .take()
-                .ok_or(TinyUIError::UninitializedItemList(
-                    "ProgressBar",
-                    line!(),
-                    file!(),
-                ))?
-                .ratio(*progress / 100.);
-            (pb, status, message)
-        };
-        // let self= pb.clone
-        frame.render_widget(pb.clone(), progress_area);
-        frame.render_widget(status, title_area);
-        frame.render_widget(message, main_area);
-        // frame.render_widget(Paragraph::new(format!("{:?}", Instant::now())), main_area);
-        // thread::sleep(Duration::from_millis(100));
-        self.menu_items.progress_bar = Some(pb);
-        // TODO: If progress = 100 move to final step and show S / enter to save G for graph
-        Ok(())
-    }
-
     /// Draw the config info
     fn draw_config(&mut self, frame: &mut Frame) -> Result<(), TinyUIError> {
         let [title_area, main_area, status_area] = Layout::vertical([
@@ -296,6 +248,180 @@ impl<'a> AppInfo<'a> {
         Ok(())
     }
 
+    /// Draw the progress, updates as the progress is being done
+    fn draw_progress(&mut self, frame: &mut Frame<'_>) -> Result<(), TinyUIError> {
+        let [_, main_s, _] = Layout::horizontal([
+            Constraint::Min(7),
+            Constraint::Percentage(90),
+            Constraint::Min(7),
+        ])
+        .areas(frame.area());
+        let [title_area, progress_area, main_area, _, _] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Min(10),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .areas(main_s);
+        let (pb, status, message) = {
+            let status = self.scan_message.try_lock().unwrap();
+            let status = Paragraph::new(status.clone())
+                .block(Block::bordered().title("Operation"))
+                .style(SELECTED_COLOR);
+            let message = self.scan_info.try_lock().unwrap();
+            let message = Paragraph::new(message.clone())
+                .block(Block::bordered().title("TinySA Info"))
+                .style(SELECTED_COLOR);
+            let progress = self.progress.try_lock().unwrap();
+
+            let pb = self
+                .menu_items
+                .progress_bar
+                .take()
+                .ok_or(TinyUIError::UninitializedItemList(
+                    "ProgressBar",
+                    line!(),
+                    file!(),
+                ))?
+                .ratio(*progress as f64 / 100.);
+            (pb, status, message)
+        };
+        frame.render_widget(pb.clone(), progress_area);
+        frame.render_widget(status, title_area);
+        frame.render_widget(message, main_area);
+        self.menu_items.progress_bar = Some(pb);
+        if *self.progress.lock().unwrap() >= 100 {
+            self.next_step()?;
+        }
+        Ok(())
+    }
+
+    /// Draw the last confirmation window
+    fn draw_end_window(&mut self, frame: &mut Frame) -> Result<(), TinyUIError> {
+        let [_, main_s, _] = Layout::horizontal([
+            Constraint::Min(7),
+            Constraint::Percentage(90),
+            Constraint::Min(7),
+        ])
+        .areas(frame.area());
+        let [title_area, main_area, graph_area, _, footer_area] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Length(4),
+            Constraint::Min(10),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .areas(main_s);
+        let status = Paragraph::new(format!(
+            "The scan ({}Mhz - {}Mhz) of {} points finished sucessfuly",
+            self.start_frequency.int_to_usize(),
+            self.stop_frequency.int_to_usize(),
+            self.points.int_to_usize()
+        ))
+        .block(Block::bordered().title("Status"))
+        .style(SELECTED_COLOR);
+        // let dataset = Dataset::default()
+        //     .marker(symbols::Marker::HalfBlock)
+        //     .style(Style::new().fg(Color::Blue))
+        //     .graph_type(GraphType::Bar)
+        //     // a bell curve
+        //     .data(&[
+        //         (250., -2.9),
+        //         (260., -13.5),
+        //         (270., -41.1),
+        //         (280., -80.1),
+        //         (390., -100.0),
+        //         (500., -80.1),
+        //         (610., -41.1),
+        //         (720., -13.5),
+        //         (830., -2.9),
+        //         (930., -2.9),
+        //     ]);
+
+        // let chart = Chart::new(vec![dataset])
+        //     .block(
+        //         Block::bordered().title(
+        //             Title::default()
+        //                 .content("Bar chart".cyan().bold())
+        //                 .alignment(Alignment::Center),
+        //         ),
+        //     )
+        //     .x_axis(
+        //         Axis::default()
+        //             .style(Style::default().gray())
+        //             .bounds([
+        //                 self.start_frequency.mhz_to_usize() as f64,
+        //                 self.stop_frequency.mhz_to_usize() as f64,
+        //             ])
+        //             .labels([
+        //                 self.start_frequency.int_to_string().bold(),
+        //                 format!(
+        //                     "{}",
+        //                     (self.stop_frequency.int_to_usize()
+        //                         - self.start_frequency.int_to_usize() / 2)
+        //                 )
+        //                 .into(),
+        //                 self.stop_frequency.int_to_string().bold(),
+        //             ]),
+        //     )
+        //     .y_axis(
+        //         Axis::default()
+        //             .style(Style::default().gray())
+        //             .bounds([-128.0, 0.])
+        //             .labels(["-128".bold(), "-64".into(), "0".bold()]),
+        //     );
+        // // .hidden_legend_constraints((Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)));
+
+        let datasets = vec![Dataset::default()
+            .name("Heavy")
+            .marker(Marker::Dot)
+            .graph_type(GraphType::Scatter)
+            .style(Style::new().yellow())
+            .data(&[
+                (1965., -82.),
+                (1967., -54.),
+                (1981., -65.),
+                (1989., -30.),
+                (1997., -10.),
+                (2004., -11.),
+                (2014., -45.),
+                (2016., -79.),
+                (2018., -15.),
+            ])];
+
+        let chart = Chart::new(datasets)
+            .block(
+                Block::bordered().title(
+                    Title::default()
+                        .content("Scatter chart".cyan().bold())
+                        .alignment(Alignment::Center),
+                ),
+            )
+            .x_axis(
+                Axis::default()
+                    .title("Year")
+                    .bounds([1960., 2020.])
+                    .style(Style::default().fg(Color::Gray))
+                    .labels(["1960", "1990", "2020"]),
+            )
+            .y_axis(
+                Axis::default()
+                    .title("Cost")
+                    .bounds([-128., 0.])
+                    .style(Style::default().fg(Color::Gray))
+                    .labels(["0", "37 500", "75 000"]),
+            )
+            .hidden_legend_constraints((Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)));
+        frame.render_widget(chart, graph_area);
+        let footer =
+            Paragraph::new("Press ↲ to save the data as a csv or q to exit without saving.")
+                .centered();
+        frame.render_widget(status, title_area);
+        frame.render_widget(footer, footer_area);
+        Ok(())
+    }
+
     /// Handle keys while in the first menu
     fn handle_start_keys(&mut self, key: KeyEvent) -> Result<(), TinyUIError> {
         if key.kind != KeyEventKind::Press {
@@ -307,22 +433,10 @@ impl<'a> AppInfo<'a> {
             KeyCode::Char('k') | KeyCode::Up => self.change_cursor_position(InputDirection::Up),
             KeyCode::Char('h') | KeyCode::Left => self.next_menu(InputDirection::Left)?,
             KeyCode::Char('l') | KeyCode::Right => self.next_menu(InputDirection::Right)?,
-            v @ (KeyCode::Char('0')
-            | KeyCode::Char('1')
-            | KeyCode::Char('2')
-            | KeyCode::Char('3')
-            | KeyCode::Char('4')
-            | KeyCode::Char('5')
-            | KeyCode::Char('6')
-            | KeyCode::Char('7')
-            | KeyCode::Char('8')
-            | KeyCode::Char('a')) => {
-                self.status_message = format!("{:?}", v);
-            } // KeyCode::Char('g') | KeyCode::Home => self.select_first(),
-            // KeyCode::Char('G') | KeyCode::End => self.select_last(),
-            KeyCode::Enter => {
-                self.next_step()?;
-            }
+            KeyCode::Enter => match self.flow_state {
+                AppState::Finished => (),
+                _ => self.next_step()?,
+            },
             _ => {}
         }
         Ok(())
@@ -340,7 +454,7 @@ impl<'a> AppInfo<'a> {
                 SelectedFinalConfig::FinalFreq => self.stop_frequency.change_value(direction),
                 SelectedFinalConfig::Points => self.points.change_value(direction),
             },
-            AppState::Popup => (),
+            AppState::EndWindow => (),
             AppState::Finished => (),
         }
     }
@@ -366,7 +480,7 @@ impl<'a> AppInfo<'a> {
                     _ => None,
                 }
             }
-            AppState::Popup => None,
+            AppState::EndWindow => None,
             AppState::Finished => None,
         } {
             self.flow_state = s;
@@ -393,13 +507,20 @@ impl<'a> AppInfo<'a> {
                 let start = self.start_frequency.mhz_to_usize();
                 let stop = self.stop_frequency.mhz_to_usize();
                 let points = self.points.int_to_usize();
-                thread::spawn(move || {
-                    scan::scan_with_progress(pmtx, mmtx, cmtx, port, start, stop, points).unwrap()
-                });
+                // BYPASS
+                *self.progress.lock().unwrap() = 100;
+                // thread::spawn(move || {
+                //     scan::scan_with_progress(pmtx, mmtx, cmtx, port, start, stop, points).unwrap()
+                // });
                 // scan::scan_with_progress(pmtx, mmtx, cmtx, port).unwrap();
             }
-            AppState::Popup => todo!(),
-            AppState::Finished => todo!(),
+            AppState::EndWindow => {
+                self.should_quit = true;
+            }
+            AppState::Finished => {
+                self.flow_state = AppState::EndWindow;
+                self.init_end()?;
+            }
         }
         Ok(())
     }

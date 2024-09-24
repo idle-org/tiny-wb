@@ -45,7 +45,7 @@ static EOF: OnceLock<memmem::Finder<'_>> = OnceLock::new();
 
 /// Scan a specific range and returns the scan result
 pub(crate) fn scan_with_progress(
-    progress: Arc<Mutex<f64>>,
+    progress: Arc<Mutex<usize>>,
     scan_info: Arc<Mutex<String>>,
     scan_message: Arc<Mutex<String>>,
     port: String,
@@ -59,34 +59,31 @@ pub(crate) fn scan_with_progress(
         .open()
         .expect("Failed to open port");
     *scan_message.lock().unwrap() = "Initialisation...".to_string();
-    *progress.lock().unwrap() = 5.;
+    *progress.lock().unwrap() = 5;
     initialize(&mut port);
 
-    *progress.lock().unwrap() = 15.;
+    *progress.lock().unwrap() = 15;
     *scan_message.lock().unwrap() = "Acquiring version & info".to_string();
     let v = send_cmd(&mut port, "version\r", SHORT_WAIT);
     let i = send_cmd(&mut port, "info\r", SHORT_WAIT);
     *scan_info.lock().unwrap() = format!("{}{}", v, i);
 
-    *progress.lock().unwrap() = 16.;
+    *progress.lock().unwrap() = 16;
     *scan_message.lock().unwrap() = "Setting zero...".to_string();
     send_cmd(&mut port, &format!("zero {}\r", OFFSET), SHORT_WAIT);
-    // ("{}", send_cmd(&mut port, "leveloffset\r", SHORT_WAIT));
-    // ("{}", send_cmd(&mut port, "deviceid\r", SHORT_WAIT));
-    // ("{}", send_cmd(&mut port, "usart_cfg\r", SHORT_WAIT));
 
-    *progress.lock().unwrap() = 17.;
+    *progress.lock().unwrap() = 17;
     *scan_message.lock().unwrap() = "Setting up scan & mode".to_string();
     send_cmd(&mut port, "marker\r", SHORT_WAIT);
     send_cmd(&mut port, "pause\r", SHORT_WAIT);
     send_cmd(&mut port, "mode high input\r", SHORT_WAIT);
 
-    *progress.lock().unwrap() = 18.;
+    *progress.lock().unwrap() = 18;
     *scan_message.lock().unwrap() = "Setting up sweep".to_string();
     send_cmd(&mut port, &format!("sweep start {}\r", START), SHORT_WAIT);
     send_cmd(&mut port, &format!("sweep stop {}\r", STOP), SHORT_WAIT);
 
-    *progress.lock().unwrap() = 20.;
+    *progress.lock().unwrap() = 20;
     *scan_message.lock().unwrap() = "Starting scan...".to_string();
     send_cmd(&mut port, "sweep\r", SHORT_WAIT);
     send_cmd(
@@ -95,14 +92,14 @@ pub(crate) fn scan_with_progress(
         TIMEOUT,
     );
 
-    *progress.lock().unwrap() = 22.;
+    *progress.lock().unwrap() = 22;
     scanraw(&mut port, progress.clone(), start, stop, points)?;
 
     *scan_message.lock().unwrap() = "Scan finished".to_string();
     send_cmd(&mut port, "resume\r", SHORT_WAIT);
 
-    *progress.lock().unwrap() = 100.;
     wait_sync(LONG_WAIT);
+    *progress.lock().unwrap() = 100;
     Ok(())
 }
 
@@ -122,7 +119,7 @@ fn wait_sync(duration: u64) {
 /// Scan raw frequencies
 fn scanraw(
     port: &mut Box<dyn SerialPort>,
-    progress: Arc<Mutex<f64>>,
+    progress: Arc<Mutex<usize>>,
     start: usize,
     stop: usize,
     points: usize,
@@ -156,6 +153,29 @@ fn read_utf8(port: &mut Box<dyn SerialPort>) -> String {
 }
 
 /// Reads the serial port until it reaches EOF
+fn read_port_with_progress(
+    port: &mut Box<dyn SerialPort>,
+    expected: usize,
+    progress: Arc<Mutex<usize>>,
+) -> Vec<u8> {
+    let mut serial_buf: Vec<u8> = vec![0; 64];
+    let mut res = Vec::new();
+    let finder = EOF.get_or_init(|| memmem::Finder::new("ch>"));
+    while let Ok(r) = port.read(serial_buf.as_mut_slice()) {
+        *progress.lock().unwrap() = (100usize.saturating_sub(
+            (80 * (expected.saturating_sub(res.len())).clamp(0, expected)) / expected,
+        ))
+        .clamp(20, 99);
+        if let Some(pos) = finder.find(&serial_buf) {
+            res.extend_from_slice(&serial_buf[..pos]);
+            break;
+        }
+        res.extend_from_slice(&serial_buf[..r]);
+    }
+    res
+}
+
+/// Read port without updating progress
 fn read_port(port: &mut Box<dyn SerialPort>) -> Vec<u8> {
     let mut serial_buf: Vec<u8> = vec![0; 256];
     let mut res = Vec::new();
@@ -176,16 +196,16 @@ fn read_port(port: &mut Box<dyn SerialPort>) -> Vec<u8> {
 /// Returns a struct summerizing the information processed
 fn read_scanraw(
     port: &mut Box<dyn SerialPort>,
-    progress: Arc<Mutex<f64>>,
+    progress: Arc<Mutex<usize>>,
     points: usize,
 ) -> Result<(), TinyError> {
-    let v = read_port(port);
+    let v = read_port_with_progress(port, points * 3 + 6, progress);
     // Find the { marking the beggining
-    parse_data(v, progress, points)
+    parse_data(v, points)
 }
 
 /// A utility function used for parsing the raw data of a scan
-pub fn parse_data(v: Vec<u8>, progress: Arc<Mutex<f64>>, points: usize) -> Result<(), TinyError> {
+pub fn parse_data(v: Vec<u8>, points: usize) -> Result<(), TinyError> {
     let mut values: Vec<u16> = Vec::with_capacity(points);
     let mut out = BufWriter::new(File::create("test.csv")?);
     if let Some(begining) = memchr::memchr(b'{', &v) {
@@ -216,12 +236,3 @@ pub fn parse_data(v: Vec<u8>, progress: Arc<Mutex<f64>>, points: usize) -> Resul
 fn u16_to_f64(v: u16) -> f64 {
     (v as f64) / 32. - OFFSET as f64
 }
-
-// /// The result of a scan
-// pub struct ScanResult {
-//     start: usize,
-//     stop: usize,
-//     points: usize,
-//     status: ScanStatus,
-//     data: Vec<f64>,
-// }
