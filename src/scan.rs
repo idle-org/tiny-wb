@@ -4,10 +4,6 @@
 static START: usize = 240_000_000;
 /// The default stop value for a scan
 static STOP: usize = 959_000_000;
-/// The default number of points
-static POINTS: usize = 290; //(STOP - START) * 10;
-/// The default increment (deduced from the number of points)
-static INCREMENT: usize = (STOP - START) / POINTS; // 1000/100
 /// The offset used for sending data
 static OFFSET: usize = 128;
 /// The base delay used inbetween commands
@@ -29,6 +25,8 @@ use std::{
     time::Duration,
 };
 
+use chrono::Local;
+
 /// A single datapoint, using a struct might be overkill but msb/lsb could become a problem in the future
 #[derive(PackedStruct, Debug)]
 #[packed_struct(endian = "lsb")]
@@ -44,20 +42,26 @@ pub struct DataPoint {
 static EOF: OnceLock<memmem::Finder<'_>> = OnceLock::new();
 
 /// Scan a specific range and returns the scan result
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn scan_with_progress(
     progress: Arc<Mutex<usize>>,
     scan_info: Arc<Mutex<String>>,
     scan_message: Arc<Mutex<String>>,
+    return_data: Arc<Mutex<Vec<(f64, f64)>>>,
     port: String,
     start: usize,
     stop: usize,
     points: usize,
 ) -> Result<(), TinyError> {
     *scan_message.lock().unwrap() = "Oppening connection".to_string();
-    let mut port = serialport::new(port, 115_200)
+    let port = serialport::new(port, 115_200)
         .timeout(Duration::from_millis(3000))
-        .open()
-        .expect("Failed to open port");
+        .open(); // .expect("Failed to open port");
+    if let Err(e) = port {
+        *scan_message.lock().unwrap() = "Noo".to_string();
+        return Err(TinyError::PortConnection(e));
+    }
+    let mut port = port.unwrap();
     *scan_message.lock().unwrap() = "Initialisation...".to_string();
     *progress.lock().unwrap() = 5;
     initialize(&mut port);
@@ -93,9 +97,16 @@ pub(crate) fn scan_with_progress(
     );
 
     *progress.lock().unwrap() = 22;
-    scanraw(&mut port, progress.clone(), start, stop, points)?;
+    let name = scanraw(
+        &mut port,
+        progress.clone(),
+        return_data.clone(),
+        start,
+        stop,
+        points,
+    )?;
 
-    *scan_message.lock().unwrap() = "Scan finished".to_string();
+    *scan_message.lock().unwrap() = format!("Scan saved as {}", name);
     send_cmd(&mut port, "resume\r", SHORT_WAIT);
 
     wait_sync(LONG_WAIT);
@@ -120,15 +131,23 @@ fn wait_sync(duration: u64) {
 fn scanraw(
     port: &mut Box<dyn SerialPort>,
     progress: Arc<Mutex<usize>>,
+    return_data: Arc<Mutex<Vec<(f64, f64)>>>,
     start: usize,
     stop: usize,
     points: usize,
-) -> Result<(), TinyError> {
+) -> Result<String, TinyError> {
     unsafe { send_raw(port, &format!("scanraw {} {} {}\r", start, stop, points)) }
     wait_sync(SHORT_WAIT);
-    read_scanraw(port, progress, points)?;
+    let (name, val) = read_scanraw(
+        port,
+        progress,
+        points,
+        start,
+        (stop - start) as f64 / points as f64,
+    )?;
+    *return_data.lock().unwrap() = val;
     wait_sync(LONG_WAIT);
-    Ok(())
+    Ok(name)
 }
 
 /// Send a command and reads it to a string
@@ -198,16 +217,25 @@ fn read_scanraw(
     port: &mut Box<dyn SerialPort>,
     progress: Arc<Mutex<usize>>,
     points: usize,
-) -> Result<(), TinyError> {
+    start: usize,
+    increment: f64,
+) -> Result<(String, Vec<(f64, f64)>), TinyError> {
     let v = read_port_with_progress(port, points * 3 + 6, progress);
     // Find the { marking the beggining
-    parse_data(v, points)
+    parse_data(v, points, start, increment)
 }
 
 /// A utility function used for parsing the raw data of a scan
-pub fn parse_data(v: Vec<u8>, points: usize) -> Result<(), TinyError> {
-    let mut values: Vec<u16> = Vec::with_capacity(points);
-    let mut out = BufWriter::new(File::create("test.csv")?);
+pub fn parse_data(
+    v: Vec<u8>,
+    points: usize,
+    start: usize,
+    increment: f64,
+) -> Result<(String, Vec<(f64, f64)>), TinyError> {
+    // let mut values: Vec<u16> = Vec::with_capacity(points);
+    let name = format!("scan_{}.csv", Local::now().format("%Y%m%d %H_%M_%S"));
+    let mut out = BufWriter::new(File::create(&name)?);
+    let mut csvdata = Vec::with_capacity(points);
     if let Some(begining) = memchr::memchr(b'{', &v) {
         // Finds the } marking the end
         if let Some(end) = memchr::memchr(b'}', &v) {
@@ -215,15 +243,16 @@ pub fn parse_data(v: Vec<u8>, points: usize) -> Result<(), TinyError> {
             for (i, slice) in data.chunks_exact(3).enumerate() {
                 let s: &[u8; 3] = &[slice[0], slice[1], slice[2]];
                 let d = DataPoint::unpack(s)?;
-                values.push(d.value);
-                writeln!(
-                    out,
-                    "{},{}",
-                    (i * INCREMENT + START) as f64 / 1000000.,
-                    u16_to_f64(d.value) // bytes_to_f64(b1, b2)
-                )?;
+                let (pos, val) = (
+                    (i as f64 * increment + start as f64) / 1000000.,
+                    u16_to_f64(d.value),
+                );
+
+                csvdata.push((pos, val));
+                writeln!(out, "{},{}", pos, val)?;
             }
-            Ok(())
+            // TODO: Dont return use mutex
+            Ok((name, csvdata))
         } else {
             Err(TinyError::ParseEnd("}".to_owned()))
         }

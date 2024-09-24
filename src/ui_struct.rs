@@ -1,56 +1,22 @@
 //! All ui structures and utility functions
 
 //! The (minimal) user interface to control the program
-#![allow(unused_imports)]
-use clap::builder::Resettable;
-use color_eyre::{owo_colors::OwoColorize, Result};
+use color_eyre::Result;
 use ratatui::{
-    buffer::Buffer,
-    crossterm::{
-        event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
-        style::Print,
-    },
-    layout::{Constraint, Direction, Layout, Rect},
-    prelude::BlockExt,
-    style::{
-        palette::tailwind::{BLUE, GREEN, SLATE},
-        Color, Modifier, Style, Styled, Stylize,
-    },
-    symbols,
-    text::Line,
-    widgets::{
-        Block, Borders, Chart, HighlightSpacing, LineGauge, List, ListDirection, ListItem,
-        ListState, Padding, Paragraph, ScrollDirection, StatefulWidget, Widget, Wrap,
-    },
-    DefaultTerminal, Frame,
+    style::{Color, Style},
+    widgets::{Block, LineGauge, List, ListState, Paragraph},
 };
 use serialport::SerialPortInfo;
 use std::{
-    borrow::{Borrow, BorrowMut},
-    cmp::min,
-    fmt::Pointer,
     iter::Iterator,
     ops::Add,
-    str::FromStr,
     sync::{Arc, Mutex},
-    time::Instant,
 };
-use strum::{EnumCount, EnumIter, EnumProperty};
+use strum::{EnumCount, EnumIter};
 use strum::{FromRepr, IntoEnumIterator};
-use tui_textarea::{Input, Key, TextArea};
 
-use crate::structs::{InputDirection, TinyUIError};
+use crate::structs::{InputDirection, SavedConfig, TinyError, TinyUIError};
 
-/// The header style
-const HEADER_STYLE: Style = Style::new().fg(SLATE.c100).bg(BLUE.c800);
-/// The background color
-const NORMAL_ROW_BG: Color = SLATE.c950;
-/// Background color for alternated rows
-const ALT_ROW_BG_COLOR: Color = SLATE.c900;
-/// The style applied to the currently selected item
-const SELECTED_STYLE: Style = Style::new().bg(SLATE.c800).add_modifier(Modifier::BOLD);
-/// Foreground color
-const TEXT_FG_COLOR: Color = SLATE.c200;
 /// Color of a selected border
 pub(crate) const SELECTED_COLOR: Color = Color::White;
 /// Color of an unselected item
@@ -83,6 +49,8 @@ pub(crate) struct AppInfo<'a> {
     pub(crate) scan_info: Arc<Mutex<String>>,
     /// Global message
     pub(crate) scan_message: Arc<Mutex<String>>,
+    /// Return scan data
+    pub(crate) return_data: Arc<Mutex<Vec<(f64, f64)>>>,
 }
 #[derive(Debug)]
 pub(crate) struct UIUsize {
@@ -211,8 +179,8 @@ impl Default for SelectedFinalConfig {
 /// The list of all baudrates selectables
 #[derive(Debug)]
 pub(crate) struct BaudRateList {
-    /// The selected baudrate (default : BAUD1115200)
-    pub(crate) selected: usize,
+    // /// The selected baudrate (default : BAUD1115200)
+    // pub(crate) selected: usize,
     /// The baudrate list
     pub(crate) baudrates: Vec<BaudRate>,
     /// The inner state of the widget
@@ -235,12 +203,27 @@ impl BaudRateList {
             _ => (),
         }
     }
+
+    /// Create a baudrate from a config file
+    pub(crate) fn from_conf(loaded_conf: &Result<SavedConfig, TinyError>) -> BaudRateList {
+        // TODO: Actually load from baudrate
+        if let Ok(c) = loaded_conf {
+            for (i, baud) in BaudRate::iter().enumerate() {
+                if c.baudrate == baud as usize {
+                    return Self {
+                        state: ListState::default().with_selected(Some(i)),
+                        ..Default::default()
+                    };
+                }
+            }
+        }
+        Self::default()
+    }
 }
 
 impl Default for BaudRateList {
     fn default() -> Self {
         Self {
-            selected: 0,
             baudrates: BaudRate::iter().collect::<Vec<_>>(),
             state: ListState::default().with_selected(Some(3)),
         }
@@ -267,20 +250,23 @@ pub(crate) enum BaudRate {
 pub(crate) struct PortList {
     /// The list of found ports
     pub(crate) ports: Vec<String>,
-    /// The currently selected port (doing it that way completly avoids the )
-    pub(crate) selected: usize,
+    // /// The currently selected port (doing it that way completly avoids the )
+    // pub(crate) selected: usize,
     /// The inner state of the widget
     pub(crate) state: ListState,
 }
 
 impl PortList {
     /// Make a port list from a serial reading
-    pub(crate) fn from_serial(info: Vec<SerialPortInfo>) -> Self {
+    pub(crate) fn from_serial(
+        info: Vec<SerialPortInfo>,
+        saved_config: &Result<SavedConfig, TinyError>,
+    ) -> Self {
         let ports: Vec<String> = info.into_iter().map(|port| port.port_name).collect();
-        let selected = find_best_port(&ports);
+        let selected = find_best_port(&ports, saved_config);
         Self {
             ports,
-            selected,
+            // selected,
             state: ListState::default().with_selected(Some(selected)),
         }
     }
@@ -316,17 +302,24 @@ pub(crate) struct MenuItems<'a> {
     pub(crate) textboxes: Vec<Paragraph<'a>>,
     /// The progress bar
     pub(crate) progress_bar: Option<LineGauge<'a>>,
-    /// Controller info
-    pub(crate) info: Option<Chart<'a>>,
-    /// The final graph
-    pub(crate) graph: Option<Chart<'a>>,
+    // /// Controller info
+    // pub(crate) info: Option<Chart<'a>>,
+    // /// The final graph
+    // pub(crate) graph: Option<Chart<'a>>,
 }
 
 /// Try to guess the best port to preselect
-fn find_best_port(ports: &[String]) -> usize {
+fn find_best_port(ports: &[String], saved_config: &Result<SavedConfig, TinyError>) -> usize {
     // TODO: Try to load from disk then save to disk
-    let best_ports = ["/dev/ttyACM0", "COM3", "COM5", "/dev/ttyS16"];
-    for port in best_ports {
+    let mut best_ports = vec!["/dev/ttyACM0", "COM3", "COM5", "/dev/ttyS16"];
+    let p: Vec<&str> = if let Ok(c) = saved_config {
+        let mut v = vec![&*c.port];
+        v.append(&mut best_ports);
+        v
+    } else {
+        best_ports
+    };
+    for port in p {
         if let Some(p) = ports.iter().position(|v| v == port) {
             return p;
         }
@@ -346,6 +339,11 @@ impl<'a> AppInfo<'a> {
             list.block(Block::bordered().title(name).border_style(color))
                 .style(Style::default().fg(color)),
         )
+    }
+
+    /// Save the config with the current runtime variables
+    pub(crate) fn save_config(&self) -> Result<(), TinyUIError> {
+        SavedConfig::save(self)
     }
 }
 

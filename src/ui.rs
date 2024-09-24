@@ -40,7 +40,7 @@ use tui_textarea::{Input, Key, TextArea};
 
 use crate::{
     mleft, mright, scan,
-    structs::{InputDirection, TinyError, TinyUIError},
+    structs::{InputDirection, SavedConfig, TinyError, TinyUIError},
     ui_struct::{
         AppInfo, AppState, BaudRateList, MenuItems, PortList, SelectedConfig, SelectedFinalConfig,
         UIUsize, SELECTED_COLOR, UNSELECTED_COLOR,
@@ -50,19 +50,36 @@ use crate::{
 impl<'a> AppInfo<'a> {
     /// Create a new app with the port info available
     pub(crate) fn new(info: Vec<SerialPortInfo>) -> Self {
+        let loaded_conf = SavedConfig::new();
+        let (start_frequency, stop_frequency, points) = {
+            if let Ok(c) = &loaded_conf {
+                (
+                    UIUsize::new(c.start_frequency, 10, 960),
+                    UIUsize::new(c.stop_frequency, 10, 960),
+                    UIUsize::new(c.points, 100, 1000000),
+                )
+            } else {
+                (
+                    UIUsize::new(240, 10, 960),
+                    UIUsize::new(960, 10, 960),
+                    UIUsize::new(10000, 100, 1000000),
+                )
+            }
+        };
         Self {
             should_quit: false,
-            baudrate: BaudRateList::default(),
-            port_list: PortList::from_serial(info),
+            baudrate: BaudRateList::from_conf(&loaded_conf),
+            port_list: PortList::from_serial(info, &loaded_conf),
             flow_state: AppState::default(),
             status_message: String::new(),
             menu_items: MenuItems::default(),
-            start_frequency: UIUsize::new(240, 10, 960),
-            stop_frequency: UIUsize::new(960, 10, 960),
-            points: UIUsize::new(10000, 100, 1000000),
+            start_frequency,
+            stop_frequency,
+            points,
             progress: Arc::new(Mutex::new(0)),
             scan_info: Arc::new(Mutex::new(String::new())),
             scan_message: Arc::new(Mutex::new(String::new())),
+            return_data: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -94,7 +111,6 @@ impl<'a> AppInfo<'a> {
             AppState::FinalConfig(_) => self.draw_final_config(frame),
             AppState::Finished => self.draw_progress(frame),
             AppState::EndWindow => self.draw_end_window(frame),
-            // _ => unimplemented!(),
         }
     }
 
@@ -305,9 +321,9 @@ impl<'a> AppInfo<'a> {
             Constraint::Min(7),
         ])
         .areas(frame.area());
-        let [title_area, main_area, graph_area, _, footer_area] = Layout::vertical([
+        let [title_area, _main_area, graph_area, _, footer_area] = Layout::vertical([
             Constraint::Length(3),
-            Constraint::Length(4),
+            Constraint::Length(1),
             Constraint::Min(10),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -373,50 +389,55 @@ impl<'a> AppInfo<'a> {
         //     );
         // // .hidden_legend_constraints((Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)));
 
+        // TODO: Don't acquire a mutex at 60Hz
+        let binding = self.return_data.lock().unwrap();
         let datasets = vec![Dataset::default()
-            .name("Heavy")
+            // .name("Heavy")
             .marker(Marker::Dot)
             .graph_type(GraphType::Scatter)
             .style(Style::new().yellow())
-            .data(&[
-                (1965., -82.),
-                (1967., -54.),
-                (1981., -65.),
-                (1989., -30.),
-                (1997., -10.),
-                (2004., -11.),
-                (2014., -45.),
-                (2016., -79.),
-                (2018., -15.),
-            ])];
+            .data(&binding)];
 
         let chart = Chart::new(datasets)
-            .block(
-                Block::bordered().title(
-                    Title::default()
-                        .content("Scatter chart".cyan().bold())
-                        .alignment(Alignment::Center),
-                ),
-            )
+            // .block(
+            //     Block::bordered().title(
+            //         Title::default()
+            //             .content("Scatter chart".cyan().bold())
+            //             .alignment(Alignment::Center),
+            //     ),
+            // )
             .x_axis(
                 Axis::default()
-                    .title("Year")
-                    .bounds([1960., 2020.])
+                    // .title("Year")
+                    .bounds([
+                        self.start_frequency.int_to_usize() as f64,
+                        self.stop_frequency.int_to_usize() as f64,
+                    ])
                     .style(Style::default().fg(Color::Gray))
-                    .labels(["1960", "1990", "2020"]),
+                    .labels([
+                        self.start_frequency.int_to_string(),
+                        format!(
+                            "{}",
+                            (self.stop_frequency.int_to_usize()
+                                - self.start_frequency.int_to_usize())
+                                / 2
+                        ),
+                        self.stop_frequency.int_to_string(),
+                    ]),
             )
             .y_axis(
                 Axis::default()
-                    .title("Cost")
+                    // .title("Cost")
                     .bounds([-128., 0.])
                     .style(Style::default().fg(Color::Gray))
-                    .labels(["0", "37 500", "75 000"]),
-            )
-            .hidden_legend_constraints((Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)));
+                    .labels(["-128dbm", "-64dbm", "0dbm"]),
+            );
         frame.render_widget(chart, graph_area);
-        let footer =
-            Paragraph::new("Press ↲ to save the data as a csv or q to exit without saving.")
-                .centered();
+        let footer = Paragraph::new(format!(
+            "{}, press ↲ or q to exit",
+            self.scan_message.lock().unwrap().clone()
+        ))
+        .centered();
         frame.render_widget(status, title_area);
         frame.render_widget(footer, footer_area);
         Ok(())
@@ -500,18 +521,24 @@ impl<'a> AppInfo<'a> {
                 self.flow_state = AppState::Finished;
                 self.init_progress()?;
                 // Start the scan
+                // TODO: Have a struct to avoid this clusterfk
                 let pmtx = self.progress.clone();
                 let mmtx = self.scan_info.clone();
                 let cmtx = self.scan_message.clone();
+                let rdata = self.return_data.clone();
                 let port = self.port_list.selected_port();
                 let start = self.start_frequency.mhz_to_usize();
                 let stop = self.stop_frequency.mhz_to_usize();
                 let points = self.points.int_to_usize();
                 // BYPASS
                 *self.progress.lock().unwrap() = 100;
-                // thread::spawn(move || {
-                //     scan::scan_with_progress(pmtx, mmtx, cmtx, port, start, stop, points).unwrap()
-                // });
+                self.save_config()?;
+                thread::spawn(move || {
+                    let status = scan::scan_with_progress(
+                        pmtx, mmtx, cmtx, rdata, port, start, stop, points,
+                    );
+                    // TODO: Do something with bad status to avoid false positive
+                });
                 // scan::scan_with_progress(pmtx, mmtx, cmtx, port).unwrap();
             }
             AppState::EndWindow => {

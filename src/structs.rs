@@ -1,6 +1,14 @@
 //! All the structs used internally
 
+use std::{
+    fs::File,
+    io::{Read, Write},
+};
+
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::ui_struct::AppInfo;
 
 /// The most common error, exposed to the lib user and end used
 #[derive(Error, Debug)]
@@ -23,10 +31,18 @@ pub enum TinyError {
     /// A runtime error occured
     #[error("A runtime error occured :\n{0}")]
     TUIRuntimeError(color_eyre::eyre::Error),
-
     /// An error occured while trying to parse the result
     #[error("An error occured while trying to parse the result")]
     TUIPackingError(#[from] packed_struct::PackingError),
+    /// The config file couldn't be opened
+    #[error("The config file couldn't be opened")]
+    ConfigNotFound,
+    /// The config file couldn't be parsed as a valid toml
+    #[error("The config config.toml couldn't be read")]
+    InvalidConfig(#[from] toml::de::Error),
+    /// The config file couldn't be parsed as a valid toml
+    #[error("The config config.toml couldn't be written")]
+    InvalidDataForConfig(#[from] toml::ser::Error),
 }
 
 #[allow(missing_docs, clippy::missing_docs_in_private_items)]
@@ -52,10 +68,10 @@ pub enum TinyUIError {
     /// An error occured while proccesing the key events
     #[error("An error occured while proccesing the key events")]
     KeyPress(#[from] std::io::Error),
-
-    /// Mutex error likely a data race mishandled
-    #[error("An error occured while trying to fetch progress")]
-    Mutex,
+    // /// Mutex error likely a data race mishandled
+    // #[allow(dead_code)]
+    // #[error("An error occured while trying to fetch progress")]
+    // Mutex,
 }
 
 // impl TinyUIError {
@@ -63,3 +79,47 @@ pub enum TinyUIError {
 //         Self::UninitializedItemList(list, line!(), file!())
 //     }
 // }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub(crate) struct SavedConfig {
+    /// The default com port
+    pub(crate) port: String,
+    /// The default baudrate
+    pub(crate) baudrate: usize,
+    /// The default start frequency
+    pub(crate) start_frequency: usize,
+    /// The default stop frequency
+    pub(crate) stop_frequency: usize,
+    /// The default number of points
+    pub(crate) points: usize,
+}
+impl SavedConfig {
+    /// Create a config from file or returns an error
+    pub(crate) fn new() -> Result<Self, TinyError> {
+        if let Ok(mut f) = File::open("config.toml") {
+            let mut s = String::new();
+            f.read_to_string(&mut s)?;
+            let c = toml::from_str(&s)?;
+            Ok(c)
+        } else {
+            Err(TinyError::ConfigNotFound)
+        }
+    }
+
+    /// Save the config with all runtime parameters
+    pub(crate) fn save(arg: &AppInfo) -> Result<(), TinyUIError> {
+        let mut f = File::create("config.toml")?;
+        f.write_all(
+            toml::to_string(&Self {
+                port: arg.port_list.selected_port(),
+                baudrate: arg.baudrate.state.selected().unwrap(),
+                start_frequency: arg.start_frequency.int_to_usize(),
+                stop_frequency: arg.stop_frequency.int_to_usize(),
+                points: arg.points.int_to_usize(),
+            })
+            .unwrap()
+            .as_bytes(),
+        )?;
+        Ok(())
+    }
+}

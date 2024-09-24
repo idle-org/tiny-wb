@@ -4,7 +4,7 @@
 //! and will not offer any scripting capabilities
 
 #![warn(missing_docs, clippy::missing_docs_in_private_items)]
-#![allow(dead_code)]
+// #![allow(dead_code)]
 mod scan;
 mod structs;
 mod ui;
