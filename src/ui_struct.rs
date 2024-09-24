@@ -31,6 +31,7 @@ use std::{
     fmt::Pointer,
     iter::Iterator,
     ops::Add,
+    str::FromStr,
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -77,9 +78,12 @@ pub(crate) struct AppInfo<'a> {
     /// The number of points
     pub(crate) points: UIUsize,
     /// Global progress
-    pub(crate) progress: Arc<Mutex<usize>>,
+    pub(crate) progress: Arc<Mutex<f64>>,
+    /// Global initialisation data
+    pub(crate) scan_info: Arc<Mutex<String>>,
+    /// Global message
+    pub(crate) scan_message: Arc<Mutex<String>>,
 }
-
 #[derive(Debug)]
 pub(crate) struct UIUsize {
     /// Current value held by the usize
@@ -115,8 +119,13 @@ impl UIUsize {
     }
 
     /// Convert to mhz multiplying it by 1_000_000
-    pub(crate) fn mhz_to_string(&self) -> String {
-        format!("{}", self.value * 1000000)
+    pub(crate) fn mhz_to_usize(&self) -> usize {
+        self.value * 1000000
+    }
+
+    /// Output inner value
+    pub(crate) fn int_to_usize(&self) -> usize {
+        self.value
     }
 }
 
@@ -289,6 +298,11 @@ impl PortList {
             _ => (),
         }
     }
+
+    /// Returns the final selected port
+    pub(crate) fn selected_port(&self) -> String {
+        self.ports[self.state.selected().unwrap()].clone()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -299,7 +313,7 @@ pub(crate) struct MenuItems<'a> {
     /// List of port items
     pub(crate) baudlist: Option<List<'a>>,
     /// List of all the textboxes
-    pub(crate) textboxes: Vec<TextArea<'a>>,
+    pub(crate) textboxes: Vec<Paragraph<'a>>,
     /// The progress bar
     pub(crate) progress_bar: Option<LineGauge<'a>>,
     /// Controller info
@@ -318,14 +332,7 @@ fn find_best_port(ports: &[String]) -> usize {
     }
     0
 }
-// #[allow(clippy::missing_docs_in_private_items)]
-// const fn alternate_colors(i: usize) -> Color {
-//     if i % 2 == 0 {
-//         NORMAL_ROW_BG
-//     } else {
-//         ALT_ROW_BG_COLOR
-//     }
-// }
+
 impl<'a> AppInfo<'a> {
     /// Put an item a specified color
     pub(crate) fn change_color(
@@ -363,27 +370,26 @@ impl<'a> AppInfo<'a> {
                 self.menu_items.baudlist = self.change_color("Baudrate", b, b_c);
             }
             AppState::FinalConfig(ref c) => {
-                // let (mif_color, maf_color, poi_color) = match self.flow_state {
-                let colorlist = match c {
-                    SelectedFinalConfig::StartFreq => {
-                        [SELECTED_COLOR, UNSELECTED_COLOR, UNSELECTED_COLOR]
-                    }
-                    SelectedFinalConfig::FinalFreq => {
-                        [UNSELECTED_COLOR, SELECTED_COLOR, UNSELECTED_COLOR]
-                    }
-                    SelectedFinalConfig::Points => {
-                        [UNSELECTED_COLOR, UNSELECTED_COLOR, SELECTED_COLOR]
-                    }
-                };
+                // self.status_message = format!("Moo");
+                // let colorlist = match c {
+                //     SelectedFinalConfig::StartFreq => {
+                //         [SELECTED_COLOR, UNSELECTED_COLOR, UNSELECTED_COLOR]
+                //     }
+                //     SelectedFinalConfig::FinalFreq => {
+                //         [UNSELECTED_COLOR, SELECTED_COLOR, UNSELECTED_COLOR]
+                //     }
+                //     SelectedFinalConfig::Points => {
+                //         [UNSELECTED_COLOR, UNSELECTED_COLOR, SELECTED_COLOR]
+                //     }
+                // };
 
-                for (area, color) in self.menu_items.textboxes.iter_mut().zip(colorlist) {
-                    area.set_block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .style(Style::default().fg(color))
-                            .title(" Inactive (^X to switch) "),
-                    )
-                }
+                // for (area, color) in self.menu_items.textboxes.iter_mut().zip(colorlist) {
+                //     .block(
+                //         Block::default()
+                //             // .borders(Borders::ALL)
+                //             .style(Style::default().fg(Color::Blue)), // .title(" Inactive (^X to switch) "),
+                //     )
+                // }
             }
             AppState::Popup => todo!(),
             AppState::Finished => todo!(),
@@ -391,3 +397,13 @@ impl<'a> AppInfo<'a> {
         Ok(())
     }
 }
+
+// /// Create a textbox with a custom title
+// macro_rules! text_with_title {
+//     ($name:expr) => {{
+//         let mut texta = TextArea::default();
+//         let block = Block::default().title($name);
+//         texta.set_block(block);
+//         texta
+//     }};
+// }

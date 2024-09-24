@@ -1,4 +1,5 @@
 //! All the structs used internally
+
 use thiserror::Error;
 
 /// The most common error, exposed to the lib user and end used
@@ -51,6 +52,10 @@ pub enum TinyUIError {
     /// An error occured while proccesing the key events
     #[error("An error occured while proccesing the key events")]
     KeyPress(#[from] std::io::Error),
+
+    /// Mutex error likely a data race mishandled
+    #[error("An error occured while trying to fetch progress")]
+    Mutex,
 }
 
 // impl TinyUIError {

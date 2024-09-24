@@ -1,7 +1,8 @@
 //! The (minimal) user interface to control the program
 #![allow(unused_imports)]
 use clap::builder::Resettable;
-use color_eyre::owo_colors::OwoColorize;
+use color_eyre::{owo_colors::OwoColorize, Section};
+use core::time;
 use ratatui::{
     buffer::Buffer,
     crossterm::{
@@ -29,14 +30,15 @@ use std::{
     fmt::Pointer,
     iter::Iterator,
     sync::{Arc, Mutex},
-    time::Instant,
+    thread,
+    time::{Duration, Instant},
 };
 use strum::{EnumCount, EnumIter, EnumProperty};
 use strum::{FromRepr, IntoEnumIterator};
 use tui_textarea::{Input, Key, TextArea};
 
 use crate::{
-    mleft, mright,
+    mleft, mright, scan,
     structs::{InputDirection, TinyError, TinyUIError},
     ui_struct::{
         AppInfo, AppState, BaudRateList, MenuItems, PortList, SelectedConfig, SelectedFinalConfig,
@@ -57,7 +59,9 @@ impl<'a> AppInfo<'a> {
             start_frequency: UIUsize::new(240, 10, 960),
             stop_frequency: UIUsize::new(960, 10, 960),
             points: UIUsize::new(10000, 100, 1000000),
-            progress: Arc::new(Mutex::new(0)),
+            progress: Arc::new(Mutex::new(0.)),
+            scan_info: Arc::new(Mutex::new(String::new())),
+            scan_message: Arc::new(Mutex::new(String::new())),
         }
     }
 
@@ -69,11 +73,14 @@ impl<'a> AppInfo<'a> {
         self.init_config()?;
         loop {
             terminal.draw(|v| self.draw(v).inspect_err(|e| panic!("{}", e)).unwrap())?;
-            if let Event::Key(key) = event::read()? {
-                self.handle_start_keys(key)?;
-            };
-            if self.should_quit {
-                break;
+            let timeout = Duration::from_millis(16);
+            if event::poll(timeout)? {
+                if let Event::Key(key) = event::read()? {
+                    self.handle_start_keys(key)?;
+                };
+                if self.should_quit {
+                    break;
+                }
             }
         }
         Ok(())
@@ -117,21 +124,7 @@ impl<'a> AppInfo<'a> {
 
     /// Initialisation of all the ui element for the final configuration elements
     fn init_final_config(&mut self) -> Result<(), TinyUIError> {
-        // /// Create a textbox with a custom title
-        // macro_rules! text_with_title {
-        //     ($name:expr) => {{
-        //         let mut texta = TextArea::default();
-        //         let block = Block::default().title($name);
-        //         texta.set_block(block);
-        //         texta
-        //     }};
-        // }
-        self.menu_items.textboxes = vec![
-            // text_with_title!("Start Frequency"),
-            TextArea::default(),
-            TextArea::default(),
-            TextArea::default(),
-        ];
+        self.menu_items.textboxes = vec![Paragraph::new("")];
         self.update_color()
     }
 
@@ -152,6 +145,7 @@ impl<'a> AppInfo<'a> {
             Constraint::Min(7),
         ])
         .areas(main_area);
+        // TODO: Move this in the color update
         let (mif_color, maf_color, poi_color) = match self.flow_state {
             AppState::FinalConfig(SelectedFinalConfig::StartFreq) => {
                 (SELECTED_COLOR, UNSELECTED_COLOR, UNSELECTED_COLOR)
@@ -185,6 +179,7 @@ impl<'a> AppInfo<'a> {
             area_points,
         );
 
+        self.update_color()?;
         frame.render_widget(Paragraph::new(self.status_message.clone()), title_area);
         self.render_footer(frame, status_area);
         Ok(())
@@ -205,38 +200,67 @@ impl<'a> AppInfo<'a> {
         self.menu_items.progress_bar = Some(
             LineGauge::default()
                 // .block(title)
-                .filled_style(Style::default().fg(Color::Blue).bg(Color::Blue))
-                .unfilled_style(Style::default().fg(Color::Red).bg(Color::Red))
-                .label("Background:"),
+                .filled_style(Style::default().fg(Color::Blue))
+                .unfilled_style(Style::default().fg(Color::Red))
+                //             .filled_style(Style::default().fg(Color::Blue).bg(Color::Blue))
+                // .unfilled_style(Style::default().fg(Color::Red).bg(Color::Red))
+                .label("Progress:"),
         );
         Ok(())
     }
 
     /// Draw the progress, updates as the progress is being done
-    fn draw_progress(&self, frame: &mut Frame<'_>) -> Result<(), TinyUIError> {
+    fn draw_progress(&mut self, frame: &mut Frame<'_>) -> Result<(), TinyUIError> {
         // let title = title_block("Blue / red only background");
-        let [title_area, main_area, status_area] = Layout::vertical([
-            Constraint::Length(2),
-            Constraint::Min(10),
-            Constraint::Length(1),
+
+        let [_, main_s, _] = Layout::horizontal([
+            Constraint::Min(7),
+            Constraint::Percentage(90),
+            Constraint::Min(7),
         ])
         .areas(frame.area());
-        let [_, area_ports, area_baud, _] = Layout::horizontal([
-            Constraint::Min(7),
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
-            Constraint::Min(7),
+        let [title_area, _, main_area, _, progress_area] = Layout::vertical([
+            Constraint::Length(3),
+            // Constraint::Length(1),
+            Constraint::Length(1),
+            // Constraint::Length(1),
+            Constraint::Min(10),
+            Constraint::Length(1),
+            Constraint::Length(1),
         ])
-        .areas(main_area);
-        // frame.render_widget(
-        //     Paragraph::new(self.points.int_to_string())
-        //         .block(Block::bordered())
-        //         .style(poi_color),
-        //     area_points,
-        // );
+        .areas(main_s);
+        let (pb, status, message) = {
+            let status = self.scan_message.try_lock().unwrap();
+            let status = Paragraph::new(status.clone())
+                .block(Block::bordered().title("Operation"))
+                .style(SELECTED_COLOR);
+            let message = self.scan_info.try_lock().unwrap();
+            let message = Paragraph::new(message.clone())
+                .block(Block::bordered().title("TinySA Info"))
+                .style(SELECTED_COLOR);
+            let progress = self.progress.try_lock().unwrap();
+
+            let pb = self
+                .menu_items
+                .progress_bar
+                .take()
+                .ok_or(TinyUIError::UninitializedItemList(
+                    "ProgressBar",
+                    line!(),
+                    file!(),
+                ))?
+                .ratio(*progress / 100.);
+            (pb, status, message)
+        };
+        // let self= pb.clone
+        frame.render_widget(pb.clone(), progress_area);
+        frame.render_widget(status, title_area);
+        frame.render_widget(message, main_area);
+        // frame.render_widget(Paragraph::new(format!("{:?}", Instant::now())), main_area);
+        // thread::sleep(Duration::from_millis(100));
+        self.menu_items.progress_bar = Some(pb);
+        // TODO: If progress = 100 move to final step and show S / enter to save G for graph
         Ok(())
-        // .ratio(self.progress);
-        // .render(area, buf);
     }
 
     /// Draw the config info
@@ -358,7 +382,22 @@ impl<'a> AppInfo<'a> {
                 self.flow_state = AppState::FinalConfig(SelectedFinalConfig::default());
                 self.init_final_config()?;
             }
-            AppState::FinalConfig(_) => self.flow_state = AppState::Finished,
+            AppState::FinalConfig(_) => {
+                self.flow_state = AppState::Finished;
+                self.init_progress()?;
+                // Start the scan
+                let pmtx = self.progress.clone();
+                let mmtx = self.scan_info.clone();
+                let cmtx = self.scan_message.clone();
+                let port = self.port_list.selected_port();
+                let start = self.start_frequency.mhz_to_usize();
+                let stop = self.stop_frequency.mhz_to_usize();
+                let points = self.points.int_to_usize();
+                thread::spawn(move || {
+                    scan::scan_with_progress(pmtx, mmtx, cmtx, port, start, stop, points).unwrap()
+                });
+                // scan::scan_with_progress(pmtx, mmtx, cmtx, port).unwrap();
+            }
             AppState::Popup => todo!(),
             AppState::Finished => todo!(),
         }
