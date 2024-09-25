@@ -15,7 +15,7 @@ use std::{
 use strum::{EnumCount, EnumIter};
 use strum::{FromRepr, IntoEnumIterator};
 
-use crate::structs::{InputDirection, SavedConfig, TinyError, TinyUIError};
+use crate::structs::{ConnectionStatus, InputDirection, SavedConfig, TinyError, TinyUIError};
 
 /// Color of a selected border
 pub(crate) const SELECTED_COLOR: Color = Color::White;
@@ -43,6 +43,8 @@ pub(crate) struct AppInfo<'a> {
     pub(crate) stop_frequency: UIUsize,
     /// The number of points
     pub(crate) points: UIUsize,
+    /// Number of times to repeat a measure
+    pub(crate) repeat: UIUsize,
     /// Global progress
     pub(crate) progress: Arc<Mutex<usize>>,
     /// Global initialisation data
@@ -51,7 +53,15 @@ pub(crate) struct AppInfo<'a> {
     pub(crate) scan_message: Arc<Mutex<String>>,
     /// Return scan data
     pub(crate) return_data: Arc<Mutex<Vec<(f64, f64)>>>,
+    /// Connection status, allow for a simple mutex bypass
+    pub(crate) connection_status: Arc<Mutex<ConnectionStatus>>,
+    /// The current last error
+    //TODO: Solve this shite
+    pub(crate) error: Option<TinyUIError>,
+    /// A scan error
+    pub(crate) scan_error: Arc<Mutex<Option<TinyError>>>,
 }
+
 #[derive(Debug)]
 pub(crate) struct UIUsize {
     /// Current value held by the usize
@@ -108,6 +118,8 @@ pub(crate) enum AppState {
     EndWindow,
     /// Save window
     Finished,
+    /// Error window
+    Error,
 }
 
 impl Default for AppState {
@@ -286,8 +298,8 @@ impl PortList {
     }
 
     /// Returns the final selected port
-    pub(crate) fn selected_port(&self) -> String {
-        self.ports[self.state.selected().unwrap()].clone()
+    pub(crate) fn selected_port(&self) -> Result<String, TinyUIError> {
+        Ok(self.ports[self.state.selected().ok_or(TinyUIError::NoPortSelected)?].clone())
     }
 }
 
