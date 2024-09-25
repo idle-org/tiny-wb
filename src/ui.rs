@@ -82,6 +82,7 @@ impl<'a> AppInfo<'a> {
             return_data: Arc::new(Mutex::new(Vec::new())),
             connection_status: Arc::new(Mutex::new(ConnectionStatus::Uninitialised)),
             repeat: UIUsize::new(1, 1, 1000),
+            error: None,
         }
     }
 
@@ -96,7 +97,10 @@ impl<'a> AppInfo<'a> {
             let timeout = Duration::from_millis(16);
             if event::poll(timeout)? {
                 if let Event::Key(key) = event::read()? {
-                    self.handle_start_keys(key)?;
+                    if let Err(e) = self.handle_start_keys(key) {
+                        self.error = Some(e);
+                        self.flow_state = AppState::Error;
+                    };
                 };
                 if self.should_quit {
                     break;
@@ -108,12 +112,18 @@ impl<'a> AppInfo<'a> {
 
     /// Generic draw loop method
     fn draw(&mut self, frame: &mut Frame<'_>) -> Result<(), TinyUIError> {
-        match self.flow_state {
+        let r = match self.flow_state {
             AppState::InitialConfig(_) => self.draw_config(frame),
             AppState::FinalConfig(_) => self.draw_final_config(frame),
             AppState::Finished => self.draw_progress(frame),
             AppState::EndWindow => self.draw_end_window(frame),
+            AppState::Error => self.draw_error(frame),
+        };
+        if let Err(e) = r {
+            self.error = Some(e);
+            self.flow_state = AppState::Error;
         }
+        Ok(())
     }
 
     /// Initialisation of the config window
@@ -323,6 +333,48 @@ impl<'a> AppInfo<'a> {
     }
 
     /// Draw the last confirmation window
+    fn draw_error(&mut self, frame: &mut Frame) -> Result<(), TinyUIError> {
+        let [_, main_s, _] = Layout::horizontal([
+            Constraint::Min(7),
+            Constraint::Percentage(90),
+            Constraint::Min(7),
+        ])
+        .areas(frame.area());
+        let [title_area, _main_area, message_area, _, footer_area] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Min(10),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .areas(main_s);
+
+        let conn_status = *self.connection_status.lock().unwrap();
+        let status = Paragraph::new(
+            // TODO: Be more explicit with errors
+            "The scan couldn't be performed, please check your connection".to_string(),
+        )
+        .block(Block::bordered().title("Status"))
+        .style(Color::Red);
+        let error = Paragraph::new(
+            // TODO: Be more explicit with errors
+            format!(
+                "Last status: {:?}\nLast message: {}\nError: {:?}",
+                conn_status,
+                self.scan_message.lock().unwrap().clone(),
+                self.error
+            ),
+        )
+        .block(Block::bordered().title("Status"));
+        // .style(Color::Red);
+        let footer = Paragraph::new(format!("Press ↲ or q to exit")).centered();
+        frame.render_widget(status, title_area);
+        frame.render_widget(error, message_area);
+        frame.render_widget(footer, footer_area);
+        Ok(())
+    }
+
+    /// Draw the last confirmation window
     fn draw_end_window(&mut self, frame: &mut Frame) -> Result<(), TinyUIError> {
         let [_, main_s, _] = Layout::horizontal([
             Constraint::Min(7),
@@ -343,19 +395,20 @@ impl<'a> AppInfo<'a> {
         match status {
             // TODO: | ConnectionStatus::ClosedWithError
             ConnectionStatus::ConnectionFailure => {
-                let status = Paragraph::new(
-                    // TODO: Be more explicit with errors
-                    "The scan couldn't be performed, please check your connection".to_string(),
-                )
-                .block(Block::bordered().title("Status"))
-                .style(Color::Red);
-                let footer = Paragraph::new(format!(
-                    "{}, press ↲ or q to exit",
-                    self.scan_message.lock().unwrap().clone()
-                ))
-                .centered();
-                frame.render_widget(status, title_area);
-                frame.render_widget(footer, footer_area);
+                // let status = Paragraph::new(
+                //     // TODO: Be more explicit with errors and use the error status
+                //     "The scan couldn't be performed, please check your connection".to_string(),
+                // )
+                // .block(Block::bordered().title("Status"))
+                // .style(Color::Red);
+                // let footer = Paragraph::new(format!(
+                //     "{}, press ↲ or q to exit",
+                //     self.scan_message.lock().unwrap().clone()
+                // ))
+                // .centered();
+                // frame.render_widget(status, title_area);
+                // frame.render_widget(footer, footer_area);
+                self.flow_state = AppState::Error;
             }
             _ => {
                 let status = Paragraph::new(format!(
@@ -376,32 +429,33 @@ impl<'a> AppInfo<'a> {
                     .style(Style::new().yellow())
                     .data(&binding)];
 
-                let chart = Chart::new(datasets)
-                    .x_axis(
-                        Axis::default()
-                            .bounds([
-                                self.start_frequency.int_to_usize() as f64,
-                                self.stop_frequency.int_to_usize() as f64,
-                            ])
-                            .style(Style::default().fg(Color::Gray))
-                            .labels([
-                                format!("{}MHz", self.start_frequency.int_to_string()),
-                                format!(
-                                    "{}MHz",
-                                    self.start_frequency.int_to_usize()
-                                        + (self.stop_frequency.int_to_usize()
-                                            - self.start_frequency.int_to_usize())
-                                            / 2
-                                ),
-                                format!("{}MHz", self.stop_frequency.int_to_string()),
-                            ]),
-                    )
-                    .y_axis(
-                        Axis::default()
-                            .bounds([-128., 0.])
-                            .style(Style::default().fg(Color::Gray))
-                            .labels(["-128dbm", "-64dbm", "0dbm"]),
-                    );
+                let chart =
+                    Chart::new(datasets)
+                        .x_axis(
+                            Axis::default()
+                                .bounds([
+                                    self.start_frequency.int_to_usize() as f64,
+                                    self.stop_frequency.int_to_usize() as f64,
+                                ])
+                                .style(Style::default().fg(Color::Gray))
+                                .labels([
+                                    format!("{}MHz", self.start_frequency.int_to_string()),
+                                    format!(
+                                        "{}MHz",
+                                        self.start_frequency.int_to_usize()
+                                            + (self.stop_frequency.int_to_usize().saturating_sub(
+                                                self.start_frequency.int_to_usize()
+                                            )) / 2
+                                    ),
+                                    format!("{}MHz", self.stop_frequency.int_to_string()),
+                                ]),
+                        )
+                        .y_axis(
+                            Axis::default()
+                                .bounds([-128., 0.])
+                                .style(Style::default().fg(Color::Gray))
+                                .labels(["-128dbm", "-64dbm", "0dbm"]),
+                        );
                 frame.render_widget(chart, graph_area);
                 let footer = Paragraph::new(format!(
                     "{}, press ↲ or q to exit",
@@ -449,6 +503,7 @@ impl<'a> AppInfo<'a> {
             },
             AppState::EndWindow => (),
             AppState::Finished => (),
+            AppState::Error => (),
         }
     }
 
@@ -475,6 +530,7 @@ impl<'a> AppInfo<'a> {
             }
             AppState::EndWindow => None,
             AppState::Finished => None,
+            AppState::Error => None,
         } {
             self.flow_state = s;
         }
@@ -499,7 +555,7 @@ impl<'a> AppInfo<'a> {
                 let cmtx = self.scan_message.clone();
                 let rdata = self.return_data.clone();
                 let cstatus = self.connection_status.clone();
-                let port = self.port_list.selected_port();
+                let port = self.port_list.selected_port()?;
                 let start = self.start_frequency.mhz_to_usize();
                 let stop = self.stop_frequency.mhz_to_usize();
                 let points = self.points.int_to_usize();
@@ -526,6 +582,9 @@ impl<'a> AppInfo<'a> {
             AppState::Finished => {
                 self.flow_state = AppState::EndWindow;
                 self.init_end()?;
+            }
+            AppState::Error => {
+                self.should_quit = true;
             }
         }
         Ok(())

@@ -55,6 +55,9 @@ pub(crate) struct AppInfo<'a> {
     pub(crate) return_data: Arc<Mutex<Vec<(f64, f64)>>>,
     /// Connection status, allow for a simple mutex bypass
     pub(crate) connection_status: Arc<Mutex<ConnectionStatus>>,
+    /// The current last error
+    //TODO: Solve this shite
+    pub(crate) error: Option<TinyUIError>,
 }
 
 #[derive(Debug)]
@@ -113,6 +116,8 @@ pub(crate) enum AppState {
     EndWindow,
     /// Save window
     Finished,
+    /// Error window
+    Error,
 }
 
 impl Default for AppState {
@@ -291,8 +296,8 @@ impl PortList {
     }
 
     /// Returns the final selected port
-    pub(crate) fn selected_port(&self) -> String {
-        self.ports[self.state.selected().unwrap()].clone()
+    pub(crate) fn selected_port(&self) -> Result<String, TinyUIError> {
+        Ok(self.ports[self.state.selected().ok_or(TinyUIError::NoPortSelected)?].clone())
     }
 }
 

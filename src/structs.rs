@@ -51,6 +51,9 @@ pub enum TinyError {
     // TODO: Expand
     #[error("The given scan frequencies are inccorect")]
     BadScanFrequencies,
+    /// A ui error happened
+    #[error("An UI error happened")]
+    UIError(#[from] TinyUIError),
 }
 
 #[allow(missing_docs, clippy::missing_docs_in_private_items)]
@@ -80,6 +83,10 @@ pub enum TinyUIError {
     // #[allow(dead_code)]
     // #[error("An error occured while trying to fetch progress")]
     // Mutex,
+    /// Couldn't get a port from the selection
+    // TODO: Expand
+    #[error("No port was selected")]
+    NoPortSelected,
 }
 
 // impl TinyUIError {
@@ -120,7 +127,7 @@ impl SavedConfig {
         // TODO: Prone to failure
         f.write_all(
             toml::to_string(&Self {
-                port: arg.port_list.selected_port(),
+                port: arg.port_list.selected_port()?,
                 baudrate: BaudRate::iter()
                     .nth(arg.baudrate.state.selected().unwrap())
                     .unwrap() as usize,
