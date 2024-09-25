@@ -43,6 +43,8 @@ pub(crate) struct AppInfo<'a> {
     pub(crate) stop_frequency: UIUsize,
     /// The number of points
     pub(crate) points: UIUsize,
+    /// Number of times to repeat a measure
+    pub(crate) repeat: UIUsize,
     /// Global progress
     pub(crate) progress: Arc<Mutex<usize>>,
     /// Global initialisation data

@@ -1,9 +1,5 @@
 //! The "lib" used for all scan related functions
 
-/// The default start value for a scan
-static START: usize = 240_000_000;
-/// The default stop value for a scan
-static STOP: usize = 959_000_000;
 /// The offset used for sending data
 static OFFSET: usize = 128;
 /// The base delay used inbetween commands
@@ -52,11 +48,12 @@ pub(crate) fn scan_with_progress(
     start: usize,
     stop: usize,
     points: usize,
+    repeat: usize,
 ) -> Result<(), TinyError> {
     // TODO: Pass the connection status mutex to advance it
     *scan_message.lock().unwrap() = "Oppening connection".to_string();
     let port = serialport::new(port, 115_200)
-        .timeout(Duration::from_millis(3000))
+        .timeout(Duration::from_millis(5000))
         .open(); // .expect("Failed to open port");
     if let Err(e) = port {
         // *scan_message.lock().unwrap() = "Noo".to_string();
@@ -77,6 +74,11 @@ pub(crate) fn scan_with_progress(
     }
     *scan_info.lock().unwrap() = format!("{}{}", v, i);
 
+    *scan_message.lock().unwrap() = "Setting up repeat".to_string();
+    // TODO: Investigate this behaviour
+    send_cmd(&mut port, &format!("repeat {}\r", 4), SHORT_WAIT);
+    send_cmd(&mut port, &format!("calc aver16\r"), SHORT_WAIT);
+
     *progress.lock().unwrap() = 16;
     *scan_message.lock().unwrap() = "Setting zero...".to_string();
     send_cmd(&mut port, &format!("zero {}\r", OFFSET), SHORT_WAIT);
@@ -88,15 +90,13 @@ pub(crate) fn scan_with_progress(
 
     *progress.lock().unwrap() = 18;
     *scan_message.lock().unwrap() = "Setting up scan & mode".to_string();
-    // return Err(TinyError::ConfigNotFound);
-    // panic!();
     let mode = mode_from(start, stop)?;
     send_cmd(&mut port, &format!("mode {} input\r", mode), SHORT_WAIT);
 
     *progress.lock().unwrap() = 19;
     *scan_message.lock().unwrap() = "Setting up sweep".to_string();
-    send_cmd(&mut port, &format!("sweep start {}\r", START), SHORT_WAIT);
-    send_cmd(&mut port, &format!("sweep stop {}\r", STOP), SHORT_WAIT);
+    send_cmd(&mut port, &format!("sweep start {}\r", start), SHORT_WAIT);
+    send_cmd(&mut port, &format!("sweep stop {}\r", stop), SHORT_WAIT);
 
     *progress.lock().unwrap() = 20;
     *scan_message.lock().unwrap() = "Starting scan...".to_string();

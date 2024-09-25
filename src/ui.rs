@@ -81,6 +81,7 @@ impl<'a> AppInfo<'a> {
             scan_message: Arc::new(Mutex::new(String::new())),
             return_data: Arc::new(Mutex::new(Vec::new())),
             connection_status: Arc::new(Mutex::new(ConnectionStatus::Uninitialised)),
+            repeat: UIUsize::new(1, 1, 1000),
         }
     }
 
@@ -502,12 +503,13 @@ impl<'a> AppInfo<'a> {
                 let start = self.start_frequency.mhz_to_usize();
                 let stop = self.stop_frequency.mhz_to_usize();
                 let points = self.points.int_to_usize();
+                let repeat = self.repeat.int_to_usize();
                 // BYPASS
                 *self.progress.lock().unwrap() = 100;
                 self.save_config()?;
                 thread::spawn(move || {
                     let status = scan::scan_with_progress(
-                        pmtx, mmtx, cmtx, rdata, port, start, stop, points,
+                        pmtx, mmtx, cmtx, rdata, port, start, stop, points, repeat,
                     );
                     match status {
                         Ok(_) => *cstatus.lock().unwrap() = ConnectionStatus::ClosedWithSuccess,
