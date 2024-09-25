@@ -50,10 +50,13 @@ pub enum TinyError {
     /// The given scan frequencies are incorrect
     // TODO: Expand
     #[error("The given scan frequencies are inccorect")]
-    BadScanFrequencies,
-    /// A ui error happened
-    #[error("An UI error happened")]
-    UIError(#[from] TinyUIError),
+    BadScanFrequencies(String),
+    /// The error wasn't caused during the scanning process
+    #[error("Unspecified error")]
+    NoErrorSpecified,
+    // /// A ui error happened
+    // #[error("An UI error happened")]
+    // UIError(#[from] TinyUIError),
 }
 
 #[allow(missing_docs, clippy::missing_docs_in_private_items)]
@@ -87,6 +90,9 @@ pub enum TinyUIError {
     // TODO: Expand
     #[error("No port was selected")]
     NoPortSelected,
+    /// Any UI Error
+    #[error("An error occured while processing the scan request")]
+    ScanError(#[from] TinyError),
 }
 
 // impl TinyUIError {

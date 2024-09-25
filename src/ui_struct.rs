@@ -58,6 +58,8 @@ pub(crate) struct AppInfo<'a> {
     /// The current last error
     //TODO: Solve this shite
     pub(crate) error: Option<TinyUIError>,
+    /// A scan error
+    pub(crate) scan_error: Arc<Mutex<Option<TinyError>>>,
 }
 
 #[derive(Debug)]

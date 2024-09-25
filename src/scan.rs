@@ -9,7 +9,9 @@ static LONG_WAIT: u64 = 200;
 /// The standard timeout time
 static TIMEOUT: u64 = 2000;
 
+use crate::info;
 use crate::structs::TinyError;
+use log::error;
 use memchr::memmem;
 use packed_struct::prelude::*;
 use serialport::SerialPort;
@@ -48,8 +50,10 @@ pub(crate) fn scan_with_progress(
     start: usize,
     stop: usize,
     points: usize,
+    // TODO: Add repeat to tui
     repeat: usize,
 ) -> Result<(), TinyError> {
+    let mode = mode_from(start, stop)?;
     // TODO: Pass the connection status mutex to advance it
     *scan_message.lock().unwrap() = "Oppening connection".to_string();
     let port = serialport::new(port, 115_200)
@@ -60,6 +64,7 @@ pub(crate) fn scan_with_progress(
         return Err(TinyError::PortConnection(e));
     }
     let mut port = port.unwrap();
+    // TODO: Show all unitialised data somewhere
     *scan_message.lock().unwrap() = "Initialisation...".to_string();
     *progress.lock().unwrap() = 5;
     initialize(&mut port);
@@ -76,8 +81,9 @@ pub(crate) fn scan_with_progress(
 
     *scan_message.lock().unwrap() = "Setting up repeat".to_string();
     // TODO: Investigate this behaviour
-    send_cmd(&mut port, &format!("repeat {}\r", 4), SHORT_WAIT);
-    send_cmd(&mut port, &format!("calc aver16\r"), SHORT_WAIT);
+    send_cmd(&mut port, &format!("repeat {}\r", 5), SHORT_WAIT);
+    // TODO: Allow for user configuration
+    send_cmd(&mut port, "calc aver16\r", SHORT_WAIT);
 
     *progress.lock().unwrap() = 16;
     *scan_message.lock().unwrap() = "Setting zero...".to_string();
@@ -90,7 +96,6 @@ pub(crate) fn scan_with_progress(
 
     *progress.lock().unwrap() = 18;
     *scan_message.lock().unwrap() = "Setting up scan & mode".to_string();
-    let mode = mode_from(start, stop)?;
     send_cmd(&mut port, &format!("mode {} input\r", mode), SHORT_WAIT);
 
     *progress.lock().unwrap() = 19;
@@ -117,7 +122,12 @@ pub(crate) fn scan_with_progress(
         points,
     )?;
 
-    *scan_message.lock().unwrap() = format!("Scan saved as {}", name);
+    // TODO: Change this awful thing with a struct with all data
+    *scan_message.lock().unwrap() = format!(
+        "Scan of {} points saved as {}",
+        return_data.lock().unwrap().len(),
+        name
+    );
     send_cmd(&mut port, "resume\r", SHORT_WAIT);
 
     wait_sync(LONG_WAIT);
@@ -129,12 +139,17 @@ pub(crate) fn scan_with_progress(
 fn mode_from(start: usize, stop: usize) -> Result<String, TinyError> {
     // TODO: Switch to low if possible with another non overlaping pattern
     if start > stop {
-        return Err(TinyError::BadScanFrequencies);
+        return Err(TinyError::BadScanFrequencies(format!(
+            "Start frequency {}Hz is higher than stop frequency {}Hz",
+            start, stop
+        )));
     }
     match (start, stop) {
         (240_000_000..=960_000_000, 240_000_000..=960_000_000) => Ok("high".to_string()),
         (0..240_000_000, 0..240_000_000) => Ok("low".to_string()),
-        _ => Err(TinyError::BadScanFrequencies),
+        _ => Err(TinyError::BadScanFrequencies(
+            "Scan frequencies must either be in range (0MHz-240MHz) or (240MHz-960MHz)".to_owned(),
+        )),
     }
 }
 
@@ -142,7 +157,11 @@ fn mode_from(start: usize, stop: usize) -> Result<String, TinyError> {
 /// Wait's for a whole timeout for data stuck in the buffer and dumps it
 fn initialize(port: &mut Box<dyn SerialPort>) {
     wait_sync(SHORT_WAIT);
-    read_port(port);
+    let d = read_port(port);
+    if !d.is_empty() {
+        info!(target: "scan", "Pre-init data found");
+        info!(target: "scan", "{:?}", String::from_utf8_lossy(&d).to_string());
+    }
     wait_sync(SHORT_WAIT)
 }
 
@@ -167,7 +186,8 @@ fn scanraw(
         progress,
         points,
         start,
-        (stop - start) as f64 / points as f64,
+        // TODO: Checks that points are always >1
+        (stop - start) as f64 / (points - 1) as f64,
     )?;
     *return_data.lock().unwrap() = val;
     wait_sync(LONG_WAIT);
@@ -262,24 +282,50 @@ pub fn parse_data(
     let mut csvdata = Vec::with_capacity(points);
     if let Some(begining) = memchr::memchr(b'{', &v) {
         // Finds the } marking the end
-        if let Some(end) = memchr::memchr(b'}', &v) {
-            let data = &v[begining + 1..end];
-            for (i, slice) in data.chunks_exact(3).enumerate() {
-                let s: &[u8; 3] = &[slice[0], slice[1], slice[2]];
-                let d = DataPoint::unpack(s)?;
-                let (pos, val) = (
-                    (i as f64 * increment + start as f64) / 1000000.,
-                    u16_to_f64(d.value),
-                );
+        // Assert no bogus data is sent ? just check lenght answer ?
+        let end_tmp = v.len();
+        // if let Some(end) = memchr::memchr(b'}', &v) {
+        let data = &v[begining + 1..end_tmp];
 
-                csvdata.push((pos, val));
-                writeln!(out, "{},{}", pos, val)?;
-            }
-            // TODO: Dont return use mutex
-            Ok((name, csvdata))
-        } else {
-            Err(TinyError::ParseEnd("}".to_owned()))
+        let mut end = end_tmp;
+        let chunks_exact = data.chunks_exact(3);
+        if chunks_exact.remainder().is_empty() {
+            return Err(TinyError::ParseEnd(
+                "The data received doesn't have a end char (empty)".to_owned(),
+            ));
+        } else if chunks_exact.remainder()[0] != b'}' {
+            // No end char, bogus
+            return Err(TinyError::ParseEnd(
+                "The returned data doesn't have the right end char".to_owned(),
+            ));
         }
+        for (i, slice) in chunks_exact.enumerate() {
+            let s: &[u8; 3] = &[slice[0], slice[1], slice[2]];
+            let d = DataPoint::unpack(s)?;
+            if d.c == b'}' {
+                // Found an end and the rest is garbage
+                end = i * 3;
+                // TODO: why doesn't it pop ?
+                info!("Found an end at {end}");
+                break;
+            } else if d.c != b'x' {
+                // The alignment char is wrong
+                error!("Wrong alignment char");
+                return Err(TinyError::ParseEnd("Wrong alignement char".to_owned()));
+            }
+            let (pos, val) = (
+                (i as f64 * increment + start as f64) / 1000000.,
+                u16_to_f64(d.value),
+            );
+            info!("{},{},{} : {pos},{val}", i, increment, start);
+
+            csvdata.push((pos, val));
+            writeln!(out, "{},{}", pos, val,)?;
+        }
+        // TODO: Dont return use mutex
+        // info!("debug",format!("{} {}", data.len(), v.len());
+        info!("End at {end} {}", v[end - 1]);
+        Ok((name, csvdata))
     } else {
         Err(TinyError::ParseBeggining("{".to_owned()))
     }

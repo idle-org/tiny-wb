@@ -83,6 +83,7 @@ impl<'a> AppInfo<'a> {
             connection_status: Arc::new(Mutex::new(ConnectionStatus::Uninitialised)),
             repeat: UIUsize::new(1, 1, 1000),
             error: None,
+            scan_error: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -340,7 +341,8 @@ impl<'a> AppInfo<'a> {
             Constraint::Min(7),
         ])
         .areas(frame.area());
-        let [title_area, _main_area, message_area, _, footer_area] = Layout::vertical([
+        let [_, title_area, _main_area, message_area, _, footer_area] = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(3),
             Constraint::Length(1),
             Constraint::Min(10),
@@ -350,24 +352,45 @@ impl<'a> AppInfo<'a> {
         .areas(main_s);
 
         let conn_status = *self.connection_status.lock().unwrap();
-        let status = Paragraph::new(
-            // TODO: Be more explicit with errors
-            "The scan couldn't be performed, please check your connection".to_string(),
-        )
-        .block(Block::bordered().title("Status"))
-        .style(Color::Red);
-        let error = Paragraph::new(
-            // TODO: Be more explicit with errors
-            format!(
-                "Last status: {:?}\nLast message: {}\nError: {:?}",
-                conn_status,
-                self.scan_message.lock().unwrap().clone(),
-                self.error
-            ),
-        )
+        let status_message = match self
+            .scan_error
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap_or(&TinyError::NoErrorSpecified)
+        {
+            TinyError::ParseBeggining(_) => "An error occured while receiving data, the scan never sent back any valid data",
+            TinyError::ParseEnd(_) => "An error occured while receiving data, scan was interupted before ending properly",
+            TinyError::PortConnection(_) => "An error occured while trying to connect, check the selected port and baudrate",
+            TinyError::NoVersionFound => "An error forbid the gathering of the version, check your TinySA is connected and powered on",
+            TinyError::BadScanFrequencies(_) => "An error occured because the scan frequencies weren't set correctly",
+            TinyError::NoErrorSpecified => "An error occured while processing the scan",
+            TinyError::OpenOutput(_) => todo!(),
+            TinyError::TUIInitialization(_) => todo!(),
+            TinyError::TUIRuntimeError(_) => todo!(),
+            TinyError::TUIPackingError(_) => todo!(),
+            TinyError::ConfigNotFound => todo!(),
+            TinyError::InvalidConfig(_) => todo!(),
+            TinyError::InvalidDataForConfig(_) => todo!(),
+        };
+        let status = Paragraph::new(status_message)
+            .block(Block::bordered().title("Status"))
+            .style(Color::Red);
+        let mut additional = String::new();
+        if let Some(m) = &self.error {
+            additional.push_str(&format!("Error: {:?} => {}\n", m, m));
+        }
+        if let Some(m) = &*self.scan_error.lock().unwrap() {
+            additional.push_str(&format!("Scan Error: {:?} => {}\n", m, m));
+        }
+        let error = Paragraph::new(format!(
+            "Last status: {:?}\nLast message: {}\n{}",
+            conn_status,
+            self.scan_message.lock().unwrap().clone(),
+            additional
+        ))
         .block(Block::bordered().title("Status"));
-        // .style(Color::Red);
-        let footer = Paragraph::new(format!("Press ↲ or q to exit")).centered();
+        let footer = Paragraph::new("Press ↲ or q to exit".to_string()).centered();
         frame.render_widget(status, title_area);
         frame.render_widget(error, message_area);
         frame.render_widget(footer, footer_area);
@@ -560,6 +583,7 @@ impl<'a> AppInfo<'a> {
                 let stop = self.stop_frequency.mhz_to_usize();
                 let points = self.points.int_to_usize();
                 let repeat = self.repeat.int_to_usize();
+                let error = self.scan_error.clone();
                 // BYPASS
                 *self.progress.lock().unwrap() = 100;
                 self.save_config()?;
@@ -569,7 +593,10 @@ impl<'a> AppInfo<'a> {
                     );
                     match status {
                         Ok(_) => *cstatus.lock().unwrap() = ConnectionStatus::ClosedWithSuccess,
-                        Err(_) => *cstatus.lock().unwrap() = ConnectionStatus::ConnectionFailure,
+                        Err(e) => {
+                            *error.lock().unwrap() = Some(e);
+                            *cstatus.lock().unwrap() = ConnectionStatus::ConnectionFailure
+                        }
                     }
                     // panic!();
                     // TODO: Do something with bad status to avoid false positive
