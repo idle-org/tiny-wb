@@ -51,18 +51,20 @@ impl<'a> AppInfo<'a> {
     /// Create a new app with the port info available
     pub(crate) fn new(info: Vec<SerialPortInfo>) -> Self {
         let loaded_conf = SavedConfig::new();
-        let (start_frequency, stop_frequency, points) = {
+        let (start_frequency, stop_frequency, points, repeat) = {
             if let Ok(c) = &loaded_conf {
                 (
                     UIUsize::new(c.start_frequency, 10, 960),
                     UIUsize::new(c.stop_frequency, 10, 960),
                     UIUsize::new(c.points, 100, 1000000),
+                    UIUsize::new(c.repeat, 1, 1000),
                 )
             } else {
                 (
                     UIUsize::new(240, 10, 960),
                     UIUsize::new(960, 10, 960),
                     UIUsize::new(10000, 100, 1000000),
+                    UIUsize::new(1, 1, 1000),
                 )
             }
         };
@@ -81,7 +83,7 @@ impl<'a> AppInfo<'a> {
             scan_message: Arc::new(Mutex::new(String::new())),
             return_data: Arc::new(Mutex::new(Vec::new())),
             connection_status: Arc::new(Mutex::new(ConnectionStatus::Uninitialised)),
-            repeat: UIUsize::new(1, 1, 1000),
+            repeat,
             error: None,
             scan_error: Arc::new(Mutex::new(None)),
         }
@@ -172,25 +174,41 @@ impl<'a> AppInfo<'a> {
             Constraint::Length(1),
         ])
         .areas(frame.area());
-        let [_, area_minf, area_maxf, area_points, _] = Layout::horizontal([
+        let [_, area_minf, area_maxf, area_points, repeat, _] = Layout::horizontal([
             Constraint::Min(7),
-            Constraint::Percentage(30),
-            Constraint::Percentage(30),
-            Constraint::Percentage(30),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
             Constraint::Min(7),
         ])
         .areas(main_area);
         // TODO: Move this in the color update
-        let (mif_color, maf_color, poi_color) = match self.flow_state {
-            AppState::FinalConfig(SelectedFinalConfig::StartFreq) => {
-                (SELECTED_COLOR, UNSELECTED_COLOR, UNSELECTED_COLOR)
-            }
-            AppState::FinalConfig(SelectedFinalConfig::FinalFreq) => {
-                (UNSELECTED_COLOR, SELECTED_COLOR, UNSELECTED_COLOR)
-            }
-            AppState::FinalConfig(SelectedFinalConfig::Points) => {
-                (UNSELECTED_COLOR, UNSELECTED_COLOR, SELECTED_COLOR)
-            }
+        let (mif_color, maf_color, poi_color, rpt_color) = match self.flow_state {
+            AppState::FinalConfig(SelectedFinalConfig::StartFreq) => (
+                SELECTED_COLOR,
+                UNSELECTED_COLOR,
+                UNSELECTED_COLOR,
+                UNSELECTED_COLOR,
+            ),
+            AppState::FinalConfig(SelectedFinalConfig::FinalFreq) => (
+                UNSELECTED_COLOR,
+                SELECTED_COLOR,
+                UNSELECTED_COLOR,
+                UNSELECTED_COLOR,
+            ),
+            AppState::FinalConfig(SelectedFinalConfig::Points) => (
+                UNSELECTED_COLOR,
+                UNSELECTED_COLOR,
+                SELECTED_COLOR,
+                UNSELECTED_COLOR,
+            ),
+            AppState::FinalConfig(SelectedFinalConfig::Repeat) => (
+                UNSELECTED_COLOR,
+                UNSELECTED_COLOR,
+                UNSELECTED_COLOR,
+                SELECTED_COLOR,
+            ),
             _ => unreachable!(),
         };
 
@@ -212,6 +230,12 @@ impl<'a> AppInfo<'a> {
                 .block(Block::bordered().title("Points"))
                 .style(poi_color),
             area_points,
+        );
+        frame.render_widget(
+            Paragraph::new(self.repeat.int_to_string())
+                .block(Block::bordered().title("Repeat"))
+                .style(rpt_color),
+            repeat,
         );
 
         self.update_color()?;
@@ -523,6 +547,7 @@ impl<'a> AppInfo<'a> {
                 SelectedFinalConfig::StartFreq => self.start_frequency.change_value(direction),
                 SelectedFinalConfig::FinalFreq => self.stop_frequency.change_value(direction),
                 SelectedFinalConfig::Points => self.points.change_value(direction),
+                SelectedFinalConfig::Repeat => self.repeat.change_value(direction),
             },
             AppState::EndWindow => (),
             AppState::Finished => (),

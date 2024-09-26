@@ -113,6 +113,8 @@ pub(crate) struct SavedConfig {
     pub(crate) stop_frequency: usize,
     /// The default number of points
     pub(crate) points: usize,
+    /// The default number of repeat per point
+    pub(crate) repeat: usize,
 }
 impl SavedConfig {
     /// Create a config from file or returns an error
@@ -140,6 +142,7 @@ impl SavedConfig {
                 start_frequency: arg.start_frequency.int_to_usize(),
                 stop_frequency: arg.stop_frequency.int_to_usize(),
                 points: arg.points.int_to_usize(),
+                repeat: arg.repeat.int_to_usize(),
             })
             .unwrap()
             .as_bytes(),

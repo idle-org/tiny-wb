@@ -178,6 +178,8 @@ pub(crate) enum SelectedFinalConfig {
     FinalFreq,
     /// Selects the number of points
     Points,
+    /// Selects the repeat
+    Repeat,
     // /// Selects <Ok> to proceed
     // Proceed,
 }

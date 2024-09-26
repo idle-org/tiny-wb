@@ -30,7 +30,7 @@ use chrono::Local;
 #[packed_struct(endian = "lsb")]
 pub struct DataPoint {
     /// The alignement character 'x'
-    c: u8,
+    align: u8,
     /// The value sent with as a u16
     value: u16,
 }
@@ -50,7 +50,6 @@ pub(crate) fn scan_with_progress(
     start: usize,
     stop: usize,
     points: usize,
-    // TODO: Add repeat to tui
     repeat: usize,
 ) -> Result<(), TinyError> {
     let mode = mode_from(start, stop)?;
@@ -81,7 +80,7 @@ pub(crate) fn scan_with_progress(
 
     *scan_message.lock().unwrap() = "Setting up repeat".to_string();
     // TODO: Investigate this behaviour
-    send_cmd(&mut port, &format!("repeat {}\r", 5), SHORT_WAIT);
+    send_cmd(&mut port, &format!("repeat {}\r", repeat), SHORT_WAIT);
     // TODO: Allow for user configuration
     send_cmd(&mut port, "calc aver16\r", SHORT_WAIT);
 
@@ -302,13 +301,13 @@ pub fn parse_data(
         for (i, slice) in chunks_exact.enumerate() {
             let s: &[u8; 3] = &[slice[0], slice[1], slice[2]];
             let d = DataPoint::unpack(s)?;
-            if d.c == b'}' {
+            if d.align == b'}' {
                 // Found an end and the rest is garbage
                 end = i * 3;
                 // TODO: why doesn't it pop ?
                 info!("Found an end at {end}");
                 break;
-            } else if d.c != b'x' {
+            } else if d.align != b'x' {
                 // The alignment char is wrong
                 error!("Wrong alignment char");
                 return Err(TinyError::ParseEnd("Wrong alignement char".to_owned()));
