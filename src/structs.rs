@@ -180,30 +180,26 @@ pub(crate) struct ConnectionInfo {
 }
 
 impl ConnectionInfo {
-    /// Create a connection
-    pub(crate) fn new(
+    /// Create the initial connection containing only the initial mutex for error collection
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+    /// Updates the connection with the given data
+    pub(crate) fn fill(
+        &mut self,
         port: String,
         baudrate: u32,
         start: usize,
         stop: usize,
         points: usize,
         repeat: usize,
-    ) -> Self {
-        Self {
-            points,
-            port,
-            progress: Arc::new(Mutex::new(0)),
-            repeat,
-            return_data: Arc::new(Mutex::new(None)),
-            scan_info: Arc::new(Mutex::new(String::new())),
-            scan_message: Arc::new(Mutex::new(String::new())),
-            start,
-            stop,
-            baudrate,
-            file_name: Arc::new(Mutex::new(String::new())),
-            connection_status: Arc::new(Mutex::new(ConnectionStatus::Uninitialised)),
-            error_raised: Arc::new(Mutex::new(None)),
-        }
+    ) {
+        self.port = port;
+        self.baudrate = baudrate;
+        self.start = start;
+        self.stop = stop;
+        self.points = points;
+        self.repeat = repeat;
     }
 
     /// Updates the generic scan message
@@ -283,4 +279,24 @@ impl ConnectionInfo {
     // pub(crate) fn get_error(&self) -> &Option<TinyError> {
     //     self.error_raised.lock().as_ref().unwrap()
     // }
+}
+
+impl Default for ConnectionInfo {
+    fn default() -> Self {
+        Self {
+            points: 11,
+            baudrate: 115_200,
+            port: String::new(),
+            progress: Arc::new(Mutex::new(0)),
+            repeat: 1,
+            return_data: Arc::new(Mutex::new(None)),
+            scan_info: Arc::new(Mutex::new(String::new())),
+            scan_message: Arc::new(Mutex::new(String::new())),
+            start: 240,
+            stop: 960,
+            file_name: Arc::new(Mutex::new(String::new())),
+            connection_status: Arc::new(Mutex::new(ConnectionStatus::Uninitialised)),
+            error_raised: Arc::new(Mutex::new(None)),
+        }
+    }
 }

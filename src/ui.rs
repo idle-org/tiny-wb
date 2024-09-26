@@ -130,6 +130,7 @@ impl<'a> AppInfo<'a> {
 
     /// Initialisation of the config window
     fn init_config(&mut self) -> Result<(), TinyUIError> {
+        self.connection_info = Some(ConnectionInfo::new());
         self.menu_items.portlist = Some(
             List::new(self.port_list.to_vecstr())
                 .block(Block::bordered().title("COM Ports"))
@@ -627,22 +628,23 @@ impl<'a> AppInfo<'a> {
             AppState::FinalConfig(_) => {
                 self.flow_state = AppState::Finished;
                 self.init_progress()?;
-                // Start the scan
-                // let cstatus = self.get_connection_info()?.get_connection_status();
-                // let error = self.scan_error.clone();
-                let connection_info = ConnectionInfo::new(
-                    self.port_list.selected_port()?,
-                    self.baudrate.selected_baudrate()?,
-                    self.start_frequency.mhz_to_usize(),
-                    self.stop_frequency.mhz_to_usize(),
-                    self.points.int_to_usize(),
-                    self.repeat.int_to_usize(),
-                );
-                self.connection_info = Some(connection_info.clone());
+                let mut co = self.connection_info.take();
+                co.as_mut()
+                    .ok_or(TinyUIError::NoConnectionInfoCreated)?
+                    .fill(
+                        self.port_list.selected_port()?,
+                        self.baudrate.selected_baudrate()?,
+                        self.start_frequency.mhz_to_usize(),
+                        self.stop_frequency.mhz_to_usize(),
+                        self.points.int_to_usize(),
+                        self.repeat.int_to_usize(),
+                    );
+                self.connection_info = co.clone();
+                let co = co.unwrap();
                 let connection = self.get_connection_info()?.clone();
                 self.save_config()?;
                 thread::spawn(move || {
-                    let status = scan::scan_with_progress(connection_info);
+                    let status = scan::scan_with_progress(co);
                     match status {
                         Ok(_) => {
                             connection.update_connection_status(ConnectionStatus::ClosedWithSuccess)
