@@ -57,17 +57,17 @@ impl<'a> AppInfo<'a> {
         let (start_frequency, stop_frequency, points, repeat) = {
             if let Ok(c) = &loaded_conf {
                 (
-                    UIUsize::new(c.start_frequency, 10, 960),
-                    UIUsize::new(c.stop_frequency, 10, 960),
-                    UIUsize::new(c.points, 100, 1000000),
-                    UIUsize::new(c.repeat, 1, 1000),
+                    UIUsize::new(c.start_frequency, 10, 0, 960),
+                    UIUsize::new(c.stop_frequency, 10, 10, 960),
+                    UIUsize::new(c.points, 100, 101, 1000001),
+                    UIUsize::new(c.repeat, 1, 1, 1000),
                 )
             } else {
                 (
-                    UIUsize::new(240, 10, 960),
-                    UIUsize::new(960, 10, 960),
-                    UIUsize::new(10000, 100, 1000000),
-                    UIUsize::new(1, 1, 1000),
+                    UIUsize::new(240, 10, 0, 960),
+                    UIUsize::new(960, 10, 10, 960),
+                    UIUsize::new(10001, 100, 101, 1000001),
+                    UIUsize::new(1, 1, 1, 1000),
                 )
             }
         };
@@ -84,6 +84,7 @@ impl<'a> AppInfo<'a> {
             repeat,
             connection_info: None,
             return_data: Vec::new(),
+            logged_message: false,
         }
     }
 
@@ -301,6 +302,10 @@ impl<'a> AppInfo<'a> {
 
     /// Draw the progress, updates as the progress is being done
     fn draw_progress(&mut self, frame: &mut Frame<'_>) -> Result<(), TinyUIError> {
+        if !self.logged_message {
+            info!("An error was raised {:#?}", self.get_connection_info()?);
+            self.logged_message = true;
+        }
         let [_, main_s, _] = Layout::horizontal([
             Constraint::Min(7),
             Constraint::Percentage(90),
@@ -341,14 +346,14 @@ impl<'a> AppInfo<'a> {
         frame.render_widget(message, main_area);
         self.menu_items.progress_bar = Some(pb);
         // TODO: Use the connection status instead
-        if self.connection_info.as_ref().unwrap().get_progress() >= 100 {
+        if self.get_connection_info()?.get_progress() >= 100 {
             self.return_data = self.get_connection_info()?.get_return_data()?;
             self.next_step()?;
         }
         let st = self.get_connection_info()?.get_connection_status();
         #[allow(clippy::single_match)]
         match st {
-            // TODO: Add other failures
+            // TODO: Add other failures, skip to draw error ?
             ConnectionStatus::ConnectionFailure => self.next_step()?,
             _ => (),
         }
@@ -380,49 +385,8 @@ impl<'a> AppInfo<'a> {
         ])
         .areas(main_s);
 
-        info!("An error was raised {:#?}", self.get_connection_info()?);
         let conn_status = self.get_connection_info()?.get_connection_status();
-        let status_message = match self
-            .get_connection_info()?
-            .error_raised
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap_or(&TinyUIError::NoErrorSpecified)
-        {
-            TinyUIError::MenuSelectionError => {
-                "An error occured while trying to select a menu item"
-            }
-
-            TinyUIError::UninitializedItemList(i, _l,_ff) => {
-                &format!("The item {i} was left uninitialized")
-            }
-            TinyUIError::KeyPress(_) => "An error occured while processing key events",
-            TinyUIError::NoPortSelected => "No connection port was selected",
-            TinyUIError::NoConnectionInfoCreated => {
-                "An error occured when tring to acquire connection info with the TinySA"
-            }
-            TinyUIError::NoReturnData => {
-                "An error occured when trying to acquire the return data with the TinySA"
-            }
-            TinyUIError::NoErrorSpecified => "An unspecified error occured",
-            TinyUIError::ScanError(TinyError::ParseBeggining(_)) => {
-                "An error occured while receiving data, the scan never sent back any valid data"
-            }
-            TinyUIError::ScanError(TinyError::ParseEnd(_)) => "An error occured while receiving data, scan was interupted before ending properly",
-            TinyUIError::ScanError(TinyError::PortConnection(_)) => {
-                "An error occured while trying to connect, check the selected port and baudrate"
-            }
-            TinyUIError::ScanError(TinyError::NoVersionFound) => "An error forbid the gathering of the version, check your TinySA is connected and powered on",
-            TinyUIError::ScanError(TinyError::BadScanFrequencies(_)) => "An error occured because the scan frequencies weren't set correctly",
-            TinyUIError::ScanError(TinyError::OpenOutput(_)) => "",
-            TinyUIError::ScanError(TinyError::TUIInitialization(_)) => "",
-            TinyUIError::ScanError(TinyError::TUIRuntimeError(_)) => "",
-            TinyUIError::ScanError(TinyError::TUIPackingError(_)) => "",
-            TinyUIError::ScanError(TinyError::ConfigNotFound) => "",
-            TinyUIError::ScanError(TinyError::InvalidConfig(_)) => "",
-            TinyUIError::ScanError(TinyError::InvalidDataForConfig(_)) => "",
-        };
+        let status_message = self.error_message_from_current_error()?;
         let status = Paragraph::new(status_message)
             .block(Block::bordered().title("Status"))
             .style(Color::Red);
@@ -450,6 +414,61 @@ impl<'a> AppInfo<'a> {
         Ok(())
     }
 
+    fn error_message_from_current_error(&self) -> Result<String, TinyUIError> {
+        let status_message = match self
+            .get_connection_info()?
+            .error_raised
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap_or(&TinyUIError::NoErrorSpecified)
+        {
+            TinyUIError::MenuSelectionError => "An error occured while trying to select a menu item",
+            TinyUIError::UninitializedItemList(i, _l, _ff) => &format!("The item {i} was left uninitialized"),
+            TinyUIError::KeyPress(_) => "An error occured while processing key events",
+            TinyUIError::NoPortSelected => "No connection port was selected",
+            TinyUIError::NoConnectionInfoCreated => {
+                "An error occured when tring to acquire connection info with the TinySA"
+            }
+            TinyUIError::NoReturnData => "An error occured when trying to acquire the return data with the TinySA",
+            TinyUIError::NoErrorSpecified => "An unspecified error occured",
+            TinyUIError::ScanError(TinyError::ParseBeggining(_)) => {
+                "An error occured while receiving data, the scan never sent back any valid data"
+            }
+            TinyUIError::ScanError(TinyError::ParseEnd(_)) => {
+                "An error occured while receiving data, scan was interupted before ending properly"
+            }
+            TinyUIError::ScanError(TinyError::PortConnection(_)) => {
+                "An error occured while trying to connect, check the selected port and baudrate"
+            }
+            TinyUIError::ScanError(TinyError::NoVersionFound) => {
+                "An error forbid the gathering of the version, check your TinySA is connected and powered on"
+            }
+            TinyUIError::ScanError(TinyError::BadScanFrequencies(_)) => {
+                "An error occured because the scan frequencies weren't set correctly"
+            }
+            TinyUIError::ScanError(TinyError::OpenOutput(_)) => "An error occured while trying to export the scan",
+            TinyUIError::ScanError(TinyError::TUIInitialization(_)) => {
+                "An error occured while trying to create the TUI"
+            }
+            TinyUIError::ScanError(TinyError::TUIRuntimeError(_)) => "An error occured during runtime",
+            TinyUIError::ScanError(TinyError::TUIPackingError(_)) => {
+                "An error occured while trying to parse the data points"
+            }
+            TinyUIError::ScanError(TinyError::ConfigNotFound) => {
+                "An error occured while trying to open the config file"
+            }
+            TinyUIError::ScanError(TinyError::InvalidConfig(_)) => {
+                "An error forbid to read the config as it seems invalid, please delete config.toml and retry"
+            }
+            TinyUIError::ScanError(TinyError::InvalidDataForConfig(_)) => "An error forbit to write the config",
+            TinyUIError::ScanError(TinyError::LoggerError(_))=> "Couldn't initialize the error logger",
+            TinyUIError::ScanError(TinyError::SendError(_))=> "Couldn't finish sending data to TinySA",
+            TinyUIError::SerializeError(_) => "An error occured while tring to save the current config", 
+        };
+        Ok(status_message.to_owned())
+    }
+
     /// Draw the last confirmation window
     fn draw_end_window(&mut self, frame: &mut Frame) -> Result<(), TinyUIError> {
         let [_, main_s, _] = Layout::horizontal([
@@ -469,21 +488,7 @@ impl<'a> AppInfo<'a> {
 
         let status = self.get_connection_info()?.get_connection_status();
         match status {
-            // TODO: | ConnectionStatus::ClosedWithError
             ConnectionStatus::ConnectionFailure => {
-                // let status = Paragraph::new(
-                //     // TODO: Be more explicit with errors and use the error status
-                //     "The scan couldn't be performed, please check your connection".to_string(),
-                // )
-                // .block(Block::bordered().title("Status"))
-                // .style(Color::Red);
-                // let footer = Paragraph::new(format!(
-                //     "{}, press ↲ or q to exit",
-                //     self.scan_message.lock().unwrap().clone()
-                // ))
-                // .centered();
-                // frame.render_widget(status, title_area);
-                // frame.render_widget(footer, footer_area);
                 self.flow_state = AppState::Error;
             }
             _ => {
@@ -496,10 +501,7 @@ impl<'a> AppInfo<'a> {
                 .block(Block::bordered().title("Status"))
                 .style(SELECTED_COLOR);
 
-                // TODO: Don't acquire a mutex at 60Hz
-                // let binding = self.get_connection_info()?.get_return_data()?;
                 let datasets = vec![Dataset::default()
-                    // .name("Heavy")
                     .marker(Marker::Dot)
                     .graph_type(GraphType::Scatter)
                     .style(Style::new().yellow())
@@ -630,7 +632,6 @@ impl<'a> AppInfo<'a> {
                 // let error = self.scan_error.clone();
                 let connection_info = ConnectionInfo::new(
                     self.port_list.selected_port()?,
-                    // TODO: dont have this sht
                     self.baudrate.selected_baudrate()?,
                     self.start_frequency.mhz_to_usize(),
                     self.stop_frequency.mhz_to_usize(),
@@ -639,8 +640,6 @@ impl<'a> AppInfo<'a> {
                 );
                 self.connection_info = Some(connection_info.clone());
                 let connection = self.get_connection_info()?.clone();
-                // TODO: check wtf BYPASS
-                // *self.progress.lock().unwrap() = 100;
                 self.save_config()?;
                 thread::spawn(move || {
                     let status = scan::scan_with_progress(connection_info);
@@ -649,13 +648,13 @@ impl<'a> AppInfo<'a> {
                             connection.update_connection_status(ConnectionStatus::ClosedWithSuccess)
                         }
                         Err(e) => {
-                            // TODO: Use Error
+                            info!("An error occured during thread exec: {e}");
+                            if !connection.has_error() {
+                                connection.set_error(Some(e.into()));
+                            }
                             connection.update_connection_status(ConnectionStatus::ConnectionFailure)
                         }
                     }
-
-                    // panic!();
-                    // TODO: Do something with bad status to avoid false positive
                 });
             }
             AppState::EndWindow => {

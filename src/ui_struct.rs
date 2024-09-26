@@ -45,6 +45,8 @@ pub(crate) struct AppInfo<'a> {
     pub(crate) connection_info: Option<ConnectionInfo>,
     /// The return data, moved from a mutex to a static place
     pub(crate) return_data: Vec<(f64, f64)>,
+    /// Whether an unrecoverable error has been logged (and therefore stop logging it)
+    pub(crate) logged_message: bool,
 }
 
 #[derive(Debug)]
@@ -53,26 +55,39 @@ pub(crate) struct UIUsize {
     value: usize,
     /// Increment by witch it can be upped
     increment: usize,
+    /// Min value to clamp it to
+    min_clamp: usize,
     /// Max value to clamp it to
-    clamp: usize,
+    max_clamp: usize,
 }
 
 impl UIUsize {
     /// Change the value depending on selection
     pub(crate) fn change_value(&mut self, direction: InputDirection) {
         match direction {
-            InputDirection::Up => self.value = self.value.add(self.increment).clamp(0, self.clamp),
-            InputDirection::Down => self.value = self.value.saturating_sub(self.increment),
+            InputDirection::Up => {
+                self.value = self
+                    .value
+                    .add(self.increment)
+                    .clamp(self.min_clamp, self.max_clamp)
+            }
+            InputDirection::Down => {
+                self.value = self
+                    .value
+                    .saturating_sub(self.increment)
+                    .clamp(self.min_clamp, self.max_clamp)
+            }
             _ => (),
         }
     }
 
     /// Create a new UIUsize, usefull for TUI manipulation
-    pub(crate) fn new(value: usize, increment: usize, clamp: usize) -> Self {
+    pub(crate) fn new(value: usize, increment: usize, min_clamp: usize, max_clamp: usize) -> Self {
         Self {
             value,
             increment,
-            clamp,
+            max_clamp,
+            min_clamp,
         }
     }
 
@@ -205,7 +220,6 @@ impl BaudRateList {
 
     /// Create a baudrate from a config file
     pub(crate) fn from_conf(loaded_conf: &Result<SavedConfig, TinyError>) -> BaudRateList {
-        // TODO: Actually load from baudrate
         if let Ok(c) = loaded_conf {
             for (i, baud) in BaudRate::iter().enumerate() {
                 if c.baudrate == baud as u32 {
@@ -222,8 +236,16 @@ impl BaudRateList {
     /// Returns the final selected baudrate
     pub(crate) fn selected_baudrate(&self) -> Result<u32, TinyUIError> {
         Ok(BaudRate::iter()
-            .nth(self.state.selected().unwrap())
-            .unwrap() as u32)
+            .nth(
+                self.state
+                    .selected()
+                    .ok_or(TinyUIError::UninitializedItemList(
+                        "Baudrate",
+                        line!(),
+                        file!(),
+                    ))?,
+            )
+            .ok_or(TinyUIError::MenuSelectionError)? as u32)
     }
 }
 
@@ -316,7 +338,6 @@ pub(crate) struct MenuItems<'a> {
 
 /// Try to guess the best port to preselect
 fn find_best_port(ports: &[String], saved_config: &Result<SavedConfig, TinyError>) -> usize {
-    // TODO: Try to load from disk then save to disk
     let mut best_ports = vec!["/dev/ttyACM0", "COM3", "COM5", "/dev/ttyS16"];
     let p: Vec<&str> = if let Ok(c) = saved_config {
         let mut v = vec![&*c.port];

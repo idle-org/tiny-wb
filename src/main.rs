@@ -23,8 +23,7 @@ fn main() -> Result<(), TinyError> {
         .unwrap()
         .log_to_file(FileSpec::default())
         .write_mode(WriteMode::BufferAndFlush)
-        .start()
-        .unwrap();
+        .start()?;
 
     info!(target:"info","Logging started");
     color_eyre::install()?;

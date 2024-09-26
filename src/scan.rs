@@ -53,15 +53,15 @@ pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), 
         connection_info.set_error(Some(TinyError::PortConnection(e.clone()).into()));
         return Err(TinyError::PortConnection(e));
     }
-    let mut port = port.unwrap();
+    let mut port = port?;
     connection_info.update_message("Initialisation...");
     connection_info.update_progress(5);
     initialize(&mut port);
 
     connection_info.update_progress(15);
     connection_info.update_message("Acquiring version & info");
-    let v = send_cmd(&mut port, "version\r", SHORT_WAIT);
-    let i = send_cmd(&mut port, "info\r", SHORT_WAIT);
+    let v = send_cmd(&mut port, "version\r", SHORT_WAIT)?;
+    let i = send_cmd(&mut port, "info\r", SHORT_WAIT)?;
     // TODO: have a more thourough version check
     if v.is_empty() || i.is_empty() {
         return Err(TinyError::NoVersionFound);
@@ -69,28 +69,26 @@ pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), 
     connection_info.update_info(format!("{}{}", v, i));
 
     connection_info.update_message("Setting up repeat");
-    // TODO: Investigate this behaviour
     send_cmd(
         &mut port,
         &format!("repeat {}\r", connection_info.repeat),
         SHORT_WAIT,
-    );
+    )?;
     // // TODO: Allow for user configuration
     // send_cmd(&mut port, "calc aver16\r", SHORT_WAIT);
 
     connection_info.update_progress(16);
     connection_info.update_message("Setting zero...");
-    // TODO: Allow for user configuration
-    send_cmd(&mut port, &format!("zero {}\r", OFFSET), SHORT_WAIT);
+    send_cmd(&mut port, &format!("zero {}\r", OFFSET), SHORT_WAIT)?;
 
     connection_info.update_progress(17);
     connection_info.update_message("Setting up marker");
-    send_cmd(&mut port, "marker\r", SHORT_WAIT);
-    send_cmd(&mut port, "pause\r", SHORT_WAIT);
+    send_cmd(&mut port, "marker\r", SHORT_WAIT)?;
+    send_cmd(&mut port, "pause\r", SHORT_WAIT)?;
 
     connection_info.update_progress(18);
     connection_info.update_message("Setting up scan & mode");
-    send_cmd(&mut port, &format!("mode {} input\r", mode), SHORT_WAIT);
+    send_cmd(&mut port, &format!("mode {} input\r", mode), SHORT_WAIT)?;
 
     connection_info.update_progress(19);
     connection_info.update_message("Setting up sweep");
@@ -98,16 +96,16 @@ pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), 
         &mut port,
         &format!("sweep start {}\r", connection_info.start),
         SHORT_WAIT,
-    );
+    )?;
     send_cmd(
         &mut port,
         &format!("sweep stop {}\r", connection_info.stop),
         SHORT_WAIT,
-    );
+    )?;
 
     connection_info.update_progress(20);
     connection_info.update_message("Starting scan...");
-    send_cmd(&mut port, "sweep\r", SHORT_WAIT);
+    send_cmd(&mut port, "sweep\r", SHORT_WAIT)?;
     send_cmd(
         &mut port,
         &format!(
@@ -115,14 +113,14 @@ pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), 
             connection_info.start, connection_info.stop
         ),
         TIMEOUT,
-    );
+    )?;
 
     connection_info.update_progress(22);
     connection_info.update_filename(scanraw(&mut port, connection_info.clone())?);
 
     connection_info.update_message("Acquiring version & info");
     connection_info.update_message("Scan finished");
-    send_cmd(&mut port, "resume\r", SHORT_WAIT);
+    send_cmd(&mut port, "resume\r", SHORT_WAIT)?;
 
     // wait_sync(LONG_WAIT);
     connection_info.update_progress(100);
@@ -131,7 +129,6 @@ pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), 
 
 /// Get the mode of operation from the start & stop scan values
 fn mode_from(start: usize, stop: usize) -> Result<String, TinyError> {
-    // TODO: Switch to low if possible with another non overlaping pattern
     if start > stop {
         return Err(TinyError::BadScanFrequencies(format!(
             "Start frequency {}Hz is higher than stop frequency {}Hz",
@@ -139,8 +136,9 @@ fn mode_from(start: usize, stop: usize) -> Result<String, TinyError> {
         )));
     }
     match (start, stop) {
-        (240_000_000..=960_000_000, 240_000_000..=960_000_000) => Ok("high".to_string()),
-        (0..240_000_000, 0..240_000_000) => Ok("low".to_string()),
+        (350_000_000..=960_000_000, 350_000_000..=960_000_000) => Ok("high".to_string()),
+        (0..350_000_000, 0..350_000_000) => Ok("low".to_string()),
+        (240_000_000..350_000_000, 350_000_000..=960_000_000) => Ok("high".to_string()),
         _ => Err(TinyError::BadScanFrequencies(
             "Scan frequencies must either be in range (0MHz-240MHz) or (240MHz-960MHz)".to_owned(),
         )),
@@ -176,7 +174,7 @@ fn scanraw(
                 "scanraw {} {} {}\r",
                 connection_info.start, connection_info.stop, connection_info.points
             ),
-        )
+        )?
     }
     wait_sync(SHORT_WAIT);
     let (name, val) = read_scanraw(port, connection_info.clone())?;
@@ -186,19 +184,20 @@ fn scanraw(
 }
 
 /// Send a command and reads it to a string
-fn send_cmd(port: &mut Box<dyn SerialPort>, command: &str, wait: u64) -> String {
-    unsafe { send_raw(port, command) }
+fn send_cmd(port: &mut Box<dyn SerialPort>, command: &str, wait: u64) -> Result<String, TinyError> {
+    unsafe { send_raw(port, command)? }
     wait_sync(wait);
     let r = read_utf8(port);
     wait_sync(LONG_WAIT);
-    r
+    Ok(r)
 }
 
 /// Send a command without reading the output buffer
 /// This command will produce unknown results if the output buffer is never read
-unsafe fn send_raw(port: &mut Box<dyn SerialPort>, command: &str) {
+unsafe fn send_raw(port: &mut Box<dyn SerialPort>, command: &str) -> Result<(), TinyError> {
     let output = command.as_bytes();
-    let _r = port.write(output).expect("Write failed!");
+    let _r = port.write(output).map_err(|e| TinyError::SendError(e))?;
+    Ok(())
 }
 
 /// Reads from port and tries to convert it to string with loss
@@ -263,7 +262,6 @@ fn read_scanraw(
         v,
         connection_info.points,
         connection_info.start,
-        // TODO: Checks that points are always > 1
         (connection_info.stop - connection_info.start) as f64 / (connection_info.points - 1) as f64,
     )
 }

@@ -6,6 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use flexi_logger::FlexiLoggerError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -50,6 +51,12 @@ pub enum TinyError {
     /// The given scan frequencies are incorrect
     #[error("The given scan frequencies are inccorect ({0})")]
     BadScanFrequencies(String),
+    /// Couldn't initialize the logging modure
+    #[error("Couldn't initialize the logging modure")]
+    LoggerError(#[from] FlexiLoggerError),
+    /// Couldn't send data
+    #[error("Couldn't write to the TinySA, connection lost")]
+    SendError(std::io::Error),
 }
 
 #[allow(missing_docs, clippy::missing_docs_in_private_items)]
@@ -67,27 +74,18 @@ pub enum TinyUIError {
     /// An error due to bad menuing implementation
     #[error("An error occured while selecting a menu item")]
     MenuSelectionError,
-
     /// An error due to bad initialization
     #[error("The item list ({0}) wasn't initialyzed ({2}:{1})")]
     UninitializedItemList(&'static str, u32, &'static str),
-
     /// An error occured while proccesing the key events
     #[error("An error occured while proccesing the key events")]
     KeyPress(#[from] std::io::Error),
-    // /// Mutex error likely a data race mishandled
-    // #[allow(dead_code)]
-    // #[error("An error occured while trying to fetch progress")]
-    // Mutex,
     /// Couldn't get a port from the selection
-    // TODO: Expand
     #[error("No port was selected")]
     NoPortSelected,
-
     /// Any Scan Error
     #[error("An error occured while trying to scan: {0}")]
     ScanError(#[from] TinyError),
-
     /// No connection object was created
     #[error("An error occured while trying to acquire the connection info structure")]
     NoConnectionInfoCreated,
@@ -97,13 +95,10 @@ pub enum TinyUIError {
     /// No error was generated, this error is a meta error
     #[error("An unspecified error occured")]
     NoErrorSpecified,
+    /// Error occured while tring to serialize the config to file
+    #[error("Couldn't serialize the error to file")]
+    SerializeError(#[from] toml::ser::Error),
 }
-
-// impl TinyUIError {
-//     pub(crate) fn uninitialized_item_list_error(list: &'static str) -> Self {
-//         Self::UninitializedItemList(list, line!(), file!())
-//     }
-// }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct SavedConfig {
@@ -136,7 +131,6 @@ impl SavedConfig {
     /// Save the config with all runtime parameters
     pub(crate) fn save(arg: &AppInfo) -> Result<(), TinyUIError> {
         let mut f = File::create("config.toml")?;
-        // TODO: Prone to failure
         f.write_all(
             toml::to_string(&Self {
                 port: arg.port_list.selected_port()?,
@@ -145,8 +139,7 @@ impl SavedConfig {
                 stop_frequency: arg.stop_frequency.int_to_usize(),
                 points: arg.points.int_to_usize(),
                 repeat: arg.repeat.int_to_usize(),
-            })
-            .unwrap()
+            })?
             .as_bytes(),
         )?;
         Ok(())
@@ -166,8 +159,6 @@ pub(crate) enum ConnectionStatus {
     ConnectionFailure,
     /// The connection is closed and the connection was a succes
     ClosedWithSuccess,
-    // /// The connection is closed with a failure
-    // ClosedWithError,
 }
 
 #[derive(Debug, Clone)]
@@ -282,6 +273,11 @@ impl ConnectionInfo {
     /// Set an error
     pub(crate) fn set_error(&self, e: Option<TinyUIError>) {
         *self.error_raised.lock().unwrap() = e;
+    }
+
+    /// Wether an error has been raised
+    pub(crate) fn has_error(&self) -> bool {
+        self.error_raised.lock().unwrap().is_some()
     }
 
     // pub(crate) fn get_error(&self) -> &Option<TinyError> {
