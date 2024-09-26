@@ -3,13 +3,13 @@
 use std::{
     fs::File,
     io::{Read, Write},
+    sync::{Arc, Mutex},
 };
 
 use serde::{Deserialize, Serialize};
-use strum::IntoEnumIterator;
 use thiserror::Error;
 
-use crate::ui_struct::{AppInfo, BaudRate};
+use crate::ui_struct::AppInfo;
 
 /// The most common error, exposed to the lib user and end used
 #[derive(Error, Debug)]
@@ -48,15 +48,8 @@ pub enum TinyError {
     #[error("Couldn't acquire the version of the device connected to the specified port")]
     NoVersionFound,
     /// The given scan frequencies are incorrect
-    // TODO: Expand
-    #[error("The given scan frequencies are inccorect")]
+    #[error("The given scan frequencies are inccorect ({0})")]
     BadScanFrequencies(String),
-    /// The error wasn't caused during the scanning process
-    #[error("Unspecified error")]
-    NoErrorSpecified,
-    // /// A ui error happened
-    // #[error("An UI error happened")]
-    // UIError(#[from] TinyUIError),
 }
 
 #[allow(missing_docs, clippy::missing_docs_in_private_items)]
@@ -90,9 +83,20 @@ pub enum TinyUIError {
     // TODO: Expand
     #[error("No port was selected")]
     NoPortSelected,
-    /// Any UI Error
-    #[error("An error occured while processing the scan request")]
+
+    /// Any Scan Error
+    #[error("An error occured while trying to scan: {0}")]
     ScanError(#[from] TinyError),
+
+    /// No connection object was created
+    #[error("An error occured while trying to acquire the connection info structure")]
+    NoConnectionInfoCreated,
+    /// No return data was created or initialized
+    #[error("An error occured while trying to acquire the return data")]
+    NoReturnData,
+    /// No error was generated, this error is a meta error
+    #[error("An unspecified error occured")]
+    NoErrorSpecified,
 }
 
 // impl TinyUIError {
@@ -106,7 +110,7 @@ pub(crate) struct SavedConfig {
     /// The default com port
     pub(crate) port: String,
     /// The default baudrate
-    pub(crate) baudrate: usize,
+    pub(crate) baudrate: u32,
     /// The default start frequency
     pub(crate) start_frequency: usize,
     /// The default stop frequency
@@ -136,9 +140,7 @@ impl SavedConfig {
         f.write_all(
             toml::to_string(&Self {
                 port: arg.port_list.selected_port()?,
-                baudrate: BaudRate::iter()
-                    .nth(arg.baudrate.state.selected().unwrap())
-                    .unwrap() as usize,
+                baudrate: arg.baudrate.selected_baudrate()?,
                 start_frequency: arg.start_frequency.int_to_usize(),
                 stop_frequency: arg.stop_frequency.int_to_usize(),
                 points: arg.points.int_to_usize(),
@@ -166,4 +168,123 @@ pub(crate) enum ConnectionStatus {
     ClosedWithSuccess,
     // /// The connection is closed with a failure
     // ClosedWithError,
+}
+
+#[derive(Debug, Clone)]
+/// All data needed to handle a connection to the TinySA
+pub(crate) struct ConnectionInfo {
+    pub(crate) points: usize,
+    pub(crate) baudrate: u32,
+    pub(crate) port: String,
+    progress: Arc<Mutex<usize>>,
+    pub(crate) repeat: usize,
+    return_data: Arc<Mutex<Option<Vec<(f64, f64)>>>>,
+    scan_info: Arc<Mutex<String>>,
+    scan_message: Arc<Mutex<String>>,
+    pub(crate) start: usize,
+    pub(crate) stop: usize,
+    file_name: Arc<Mutex<String>>,
+    connection_status: Arc<Mutex<ConnectionStatus>>,
+    pub(crate) error_raised: Arc<Mutex<Option<TinyUIError>>>,
+}
+
+impl ConnectionInfo {
+    /// Create a connection
+    pub(crate) fn new(
+        port: String,
+        baudrate: u32,
+        start: usize,
+        stop: usize,
+        points: usize,
+        repeat: usize,
+    ) -> Self {
+        Self {
+            points,
+            port,
+            progress: Arc::new(Mutex::new(0)),
+            repeat,
+            return_data: Arc::new(Mutex::new(None)),
+            scan_info: Arc::new(Mutex::new(String::new())),
+            scan_message: Arc::new(Mutex::new(String::new())),
+            start,
+            stop,
+            baudrate,
+            file_name: Arc::new(Mutex::new(String::new())),
+            connection_status: Arc::new(Mutex::new(ConnectionStatus::Uninitialised)),
+            error_raised: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Updates the generic scan message
+    pub(crate) fn update_message(&self, message: &'static str) {
+        *self.scan_message.lock().unwrap() = message.to_string();
+    }
+
+    /// Updates the scan progress
+    pub(crate) fn update_progress(&self, progress: usize) {
+        *self.progress.lock().unwrap() = progress;
+    }
+
+    /// Update the information of the TinySA
+    pub(crate) fn update_info(&self, message: String) {
+        *self.scan_info.lock().unwrap() = message.to_string();
+    }
+
+    /// A clone of the mutex to keep it updated
+    pub(crate) fn mutex_progress(&self) -> Arc<Mutex<usize>> {
+        self.progress.clone()
+    }
+
+    /// Update the return data with the new points
+    pub(crate) fn update_return_data(&self, return_data: Vec<(f64, f64)>) {
+        *self.return_data.lock().unwrap() = Some(return_data);
+    }
+
+    /// Update the filename with the one choosen by the save method
+    pub(crate) fn update_filename(&self, name: String) {
+        *self.file_name.lock().unwrap() = name;
+    }
+
+    /// Get the current progression level
+    pub(crate) fn get_progress(&self) -> usize {
+        *self.progress.lock().unwrap()
+    }
+
+    /// Get the latest scan message
+    pub(crate) fn get_scan_message(&self) -> String {
+        (*self.scan_message.lock().unwrap()).to_string()
+    }
+
+    /// Get the latest tinySA information (There is no guaranty it is initialised or valid)
+    pub(crate) fn get_scan_info(&self) -> String {
+        (*self.scan_info.lock().unwrap()).to_string()
+    }
+
+    /// Get the latest connection status
+    pub(crate) fn get_connection_status(&self) -> ConnectionStatus {
+        *self.connection_status.lock().unwrap()
+    }
+
+    /// Take the return data and leave none in place
+    pub(crate) fn get_return_data(&self) -> Result<Vec<(f64, f64)>, TinyUIError> {
+        self.return_data
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or(TinyUIError::NoReturnData)
+    }
+
+    /// Updates the connection status
+    pub(crate) fn update_connection_status(&self, new_status: ConnectionStatus) {
+        *self.connection_status.lock().unwrap() = new_status
+    }
+
+    /// Set an error
+    pub(crate) fn set_error(&self, e: Option<TinyUIError>) {
+        *self.error_raised.lock().unwrap() = e;
+    }
+
+    // pub(crate) fn get_error(&self) -> &Option<TinyError> {
+    //     self.error_raised.lock().as_ref().unwrap()
+    // }
 }

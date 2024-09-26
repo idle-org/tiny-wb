@@ -9,8 +9,8 @@ static LONG_WAIT: u64 = 200;
 /// The standard timeout time
 static TIMEOUT: u64 = 2000;
 
-use crate::info;
 use crate::structs::TinyError;
+use crate::{info, structs::ConnectionInfo};
 use log::error;
 use memchr::memmem;
 use packed_struct::prelude::*;
@@ -41,96 +41,91 @@ static EOF: OnceLock<memmem::Finder<'_>> = OnceLock::new();
 
 /// Scan a specific range and returns the scan result
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn scan_with_progress(
-    progress: Arc<Mutex<usize>>,
-    scan_info: Arc<Mutex<String>>,
-    scan_message: Arc<Mutex<String>>,
-    return_data: Arc<Mutex<Vec<(f64, f64)>>>,
-    port: String,
-    start: usize,
-    stop: usize,
-    points: usize,
-    repeat: usize,
-) -> Result<(), TinyError> {
-    let mode = mode_from(start, stop)?;
-    // TODO: Pass the connection status mutex to advance it
-    *scan_message.lock().unwrap() = "Oppening connection".to_string();
-    let port = serialport::new(port, 115_200)
-        .timeout(Duration::from_millis(5000))
-        .open(); // .expect("Failed to open port");
+pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), TinyError> {
+    info!("Initializying connection: {:#?}", connection_info);
+    let mode = mode_from(connection_info.start, connection_info.stop)?;
+    connection_info.update_message("Opening connection");
+    let port = serialport::new(&connection_info.port, connection_info.baudrate)
+        .timeout(Duration::from_millis(3000))
+        .open();
     if let Err(e) = port {
-        // *scan_message.lock().unwrap() = "Noo".to_string();
+        error!("Connection error {}", e);
+        connection_info.set_error(Some(TinyError::PortConnection(e.clone()).into()));
         return Err(TinyError::PortConnection(e));
     }
     let mut port = port.unwrap();
-    // TODO: Show all unitialised data somewhere
-    *scan_message.lock().unwrap() = "Initialisation...".to_string();
-    *progress.lock().unwrap() = 5;
+    connection_info.update_message("Initialisation...");
+    connection_info.update_progress(5);
     initialize(&mut port);
 
-    *progress.lock().unwrap() = 15;
-    *scan_message.lock().unwrap() = "Acquiring version & info".to_string();
+    connection_info.update_progress(15);
+    connection_info.update_message("Acquiring version & info");
     let v = send_cmd(&mut port, "version\r", SHORT_WAIT);
     let i = send_cmd(&mut port, "info\r", SHORT_WAIT);
     // TODO: have a more thourough version check
     if v.is_empty() || i.is_empty() {
         return Err(TinyError::NoVersionFound);
     }
-    *scan_info.lock().unwrap() = format!("{}{}", v, i);
+    connection_info.update_info(format!("{}{}", v, i));
 
-    *scan_message.lock().unwrap() = "Setting up repeat".to_string();
+    connection_info.update_message("Setting up repeat");
     // TODO: Investigate this behaviour
-    send_cmd(&mut port, &format!("repeat {}\r", repeat), SHORT_WAIT);
-    // TODO: Allow for user configuration
-    send_cmd(&mut port, "calc aver16\r", SHORT_WAIT);
+    send_cmd(
+        &mut port,
+        &format!("repeat {}\r", connection_info.repeat),
+        SHORT_WAIT,
+    );
+    // // TODO: Allow for user configuration
+    // send_cmd(&mut port, "calc aver16\r", SHORT_WAIT);
 
-    *progress.lock().unwrap() = 16;
-    *scan_message.lock().unwrap() = "Setting zero...".to_string();
+    connection_info.update_progress(16);
+    connection_info.update_message("Setting zero...");
+    // TODO: Allow for user configuration
     send_cmd(&mut port, &format!("zero {}\r", OFFSET), SHORT_WAIT);
 
-    *progress.lock().unwrap() = 17;
-    *scan_message.lock().unwrap() = "Setting up marker".to_string();
+    connection_info.update_progress(17);
+    connection_info.update_message("Setting up marker");
     send_cmd(&mut port, "marker\r", SHORT_WAIT);
     send_cmd(&mut port, "pause\r", SHORT_WAIT);
 
-    *progress.lock().unwrap() = 18;
-    *scan_message.lock().unwrap() = "Setting up scan & mode".to_string();
+    connection_info.update_progress(18);
+    connection_info.update_message("Setting up scan & mode");
     send_cmd(&mut port, &format!("mode {} input\r", mode), SHORT_WAIT);
 
-    *progress.lock().unwrap() = 19;
-    *scan_message.lock().unwrap() = "Setting up sweep".to_string();
-    send_cmd(&mut port, &format!("sweep start {}\r", start), SHORT_WAIT);
-    send_cmd(&mut port, &format!("sweep stop {}\r", stop), SHORT_WAIT);
+    connection_info.update_progress(19);
+    connection_info.update_message("Setting up sweep");
+    send_cmd(
+        &mut port,
+        &format!("sweep start {}\r", connection_info.start),
+        SHORT_WAIT,
+    );
+    send_cmd(
+        &mut port,
+        &format!("sweep stop {}\r", connection_info.stop),
+        SHORT_WAIT,
+    );
 
-    *progress.lock().unwrap() = 20;
-    *scan_message.lock().unwrap() = "Starting scan...".to_string();
+    connection_info.update_progress(20);
+    connection_info.update_message("Starting scan...");
     send_cmd(&mut port, "sweep\r", SHORT_WAIT);
     send_cmd(
         &mut port,
-        &format!("scan {} {} 290 101\r", start, stop),
+        &format!(
+            "scan {} {} 290 101\r",
+            connection_info.start, connection_info.stop
+        ),
         TIMEOUT,
     );
 
-    *progress.lock().unwrap() = 22;
-    let name = scanraw(
-        &mut port,
-        progress.clone(),
-        return_data.clone(),
-        start,
-        stop,
-        points,
-    )?;
+    connection_info.update_progress(22);
+    connection_info.update_filename(scanraw(&mut port, connection_info.clone())?);
 
-    // TODO: Change this awful thing with a struct with all data
-    *scan_message.lock().unwrap() = format!(
-        "Scan of {} points saved as {}",
-        return_data.lock().unwrap().len(),
-        name
-    );
+    connection_info.update_message("Acquiring version & info");
+    connection_info.update_message("Scan finished");
     send_cmd(&mut port, "resume\r", SHORT_WAIT);
 
-    wait_sync(LONG_WAIT);
-    *progress.lock().unwrap() = 100;
+    // wait_sync(LONG_WAIT);
+    connection_info.update_progress(100);
     Ok(())
 }
 
@@ -172,23 +167,20 @@ fn wait_sync(duration: u64) {
 /// Scan raw frequencies
 fn scanraw(
     port: &mut Box<dyn SerialPort>,
-    progress: Arc<Mutex<usize>>,
-    return_data: Arc<Mutex<Vec<(f64, f64)>>>,
-    start: usize,
-    stop: usize,
-    points: usize,
+    connection_info: ConnectionInfo,
 ) -> Result<String, TinyError> {
-    unsafe { send_raw(port, &format!("scanraw {} {} {}\r", start, stop, points)) }
+    unsafe {
+        send_raw(
+            port,
+            &format!(
+                "scanraw {} {} {}\r",
+                connection_info.start, connection_info.stop, connection_info.points
+            ),
+        )
+    }
     wait_sync(SHORT_WAIT);
-    let (name, val) = read_scanraw(
-        port,
-        progress,
-        points,
-        start,
-        // TODO: Checks that points are always >1
-        (stop - start) as f64 / (points - 1) as f64,
-    )?;
-    *return_data.lock().unwrap() = val;
+    let (name, val) = read_scanraw(port, connection_info.clone())?;
+    connection_info.update_return_data(val);
     wait_sync(LONG_WAIT);
     Ok(name)
 }
@@ -224,6 +216,7 @@ fn read_port_with_progress(
     let mut res = Vec::new();
     let finder = EOF.get_or_init(|| memmem::Finder::new("ch>"));
     while let Ok(r) = port.read(serial_buf.as_mut_slice()) {
+        // TODO: Pass the whole object to avoid this unwrap ?
         *progress.lock().unwrap() = (100usize.saturating_sub(
             (80 * (expected.saturating_sub(res.len())).clamp(0, expected)) / expected,
         ))
@@ -238,6 +231,7 @@ fn read_port_with_progress(
 }
 
 /// Read port without updating progress
+// TODO: Find a way to avoid code duplication
 fn read_port(port: &mut Box<dyn SerialPort>) -> Vec<u8> {
     let mut serial_buf: Vec<u8> = vec![0; 256];
     let mut res = Vec::new();
@@ -258,17 +252,24 @@ fn read_port(port: &mut Box<dyn SerialPort>) -> Vec<u8> {
 /// Returns a struct summerizing the information processed
 fn read_scanraw(
     port: &mut Box<dyn SerialPort>,
-    progress: Arc<Mutex<usize>>,
-    points: usize,
-    start: usize,
-    increment: f64,
+    connection_info: ConnectionInfo,
 ) -> Result<(String, Vec<(f64, f64)>), TinyError> {
-    let v = read_port_with_progress(port, points * 3 + 6, progress);
-    // Find the { marking the beggining
-    parse_data(v, points, start, increment)
+    let v = read_port_with_progress(
+        port,
+        connection_info.points * 3 + 6,
+        connection_info.mutex_progress(),
+    );
+    parse_data(
+        v,
+        connection_info.points,
+        connection_info.start,
+        // TODO: Checks that points are always > 1
+        (connection_info.stop - connection_info.start) as f64 / (connection_info.points - 1) as f64,
+    )
 }
 
 /// A utility function used for parsing the raw data of a scan
+// TODO: Split save data to another function
 pub fn parse_data(
     v: Vec<u8>,
     points: usize,

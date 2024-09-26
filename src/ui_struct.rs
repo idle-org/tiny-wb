@@ -7,15 +7,11 @@ use ratatui::{
     widgets::{Block, LineGauge, List, ListState, Paragraph},
 };
 use serialport::SerialPortInfo;
-use std::{
-    iter::Iterator,
-    ops::Add,
-    sync::{Arc, Mutex},
-};
+use std::{iter::Iterator, ops::Add};
 use strum::{EnumCount, EnumIter};
 use strum::{FromRepr, IntoEnumIterator};
 
-use crate::structs::{ConnectionStatus, InputDirection, SavedConfig, TinyError, TinyUIError};
+use crate::structs::{ConnectionInfo, InputDirection, SavedConfig, TinyError, TinyUIError};
 
 /// Color of a selected border
 pub(crate) const SELECTED_COLOR: Color = Color::White;
@@ -45,21 +41,10 @@ pub(crate) struct AppInfo<'a> {
     pub(crate) points: UIUsize,
     /// Number of times to repeat a measure
     pub(crate) repeat: UIUsize,
-    /// Global progress
-    pub(crate) progress: Arc<Mutex<usize>>,
-    /// Global initialisation data
-    pub(crate) scan_info: Arc<Mutex<String>>,
-    /// Global message
-    pub(crate) scan_message: Arc<Mutex<String>>,
-    /// Return scan data
-    pub(crate) return_data: Arc<Mutex<Vec<(f64, f64)>>>,
-    /// Connection status, allow for a simple mutex bypass
-    pub(crate) connection_status: Arc<Mutex<ConnectionStatus>>,
-    /// The current last error
-    //TODO: Solve this shite
-    pub(crate) error: Option<TinyUIError>,
-    /// A scan error
-    pub(crate) scan_error: Arc<Mutex<Option<TinyError>>>,
+    /// A struct holding all the information needed to handle a connection with a tinySA
+    pub(crate) connection_info: Option<ConnectionInfo>,
+    /// The return data, moved from a mutex to a static place
+    pub(crate) return_data: Vec<(f64, f64)>,
 }
 
 #[derive(Debug)]
@@ -223,7 +208,7 @@ impl BaudRateList {
         // TODO: Actually load from baudrate
         if let Ok(c) = loaded_conf {
             for (i, baud) in BaudRate::iter().enumerate() {
-                if c.baudrate == baud as usize {
+                if c.baudrate == baud as u32 {
                     return Self {
                         state: ListState::default().with_selected(Some(i)),
                         ..Default::default()
@@ -232,6 +217,13 @@ impl BaudRateList {
             }
         }
         Self::default()
+    }
+
+    /// Returns the final selected baudrate
+    pub(crate) fn selected_baudrate(&self) -> Result<u32, TinyUIError> {
+        Ok(BaudRate::iter()
+            .nth(self.state.selected().unwrap())
+            .unwrap() as u32)
     }
 }
 
