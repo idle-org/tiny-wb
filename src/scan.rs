@@ -11,7 +11,7 @@ static TIMEOUT: u64 = 2000;
 
 use crate::structs::TinyError;
 use crate::{info, structs::ConnectionInfo};
-use log::error;
+use log::{error, trace, warn};
 use memchr::memmem;
 use packed_struct::prelude::*;
 use serialport::SerialPort;
@@ -279,11 +279,11 @@ pub fn parse_data(
     let mut out = BufWriter::new(File::create(&name)?);
     let mut csvdata = Vec::with_capacity(points);
     if let Some(begining) = memchr::memchr(b'{', &v) {
-        // Finds the } marking the end
-        // Assert no bogus data is sent ? just check lenght answer ?
         let end_tmp = v.len();
-        // if let Some(end) = memchr::memchr(b'}', &v) {
-        let data = &v[begining + 1..end_tmp];
+        let data = &v[begining + 1..end_tmp - 4]; // -4 since ch>\r will always be ignored
+                                                  // TODO: Fix weird data
+        info!("The begining looks like :{:?}", &v[begining..begining + 10]);
+        info!("The end looks like :{:?}", &v[end_tmp - 10..end_tmp - 1]);
 
         let mut end = end_tmp;
         let chunks_exact = data.chunks_exact(3);
@@ -292,10 +292,12 @@ pub fn parse_data(
                 "The data received doesn't have a end char (empty)".to_owned(),
             ));
         } else if chunks_exact.remainder()[0] != b'}' {
+            error!("Incorrect right end char {:?}", chunks_exact.remainder());
             // No end char, bogus
-            return Err(TinyError::ParseEnd(
-                "The returned data doesn't have the right end char".to_owned(),
-            ));
+            return Err(TinyError::ParseEnd(format!(
+                "The returned data doesn't have the right end char expected }} found {:?}",
+                chunks_exact.remainder()
+            )));
         }
         for (i, slice) in chunks_exact.enumerate() {
             let s: &[u8; 3] = &[slice[0], slice[1], slice[2]];
@@ -304,7 +306,7 @@ pub fn parse_data(
                 // Found an end and the rest is garbage
                 end = i * 3;
                 // TODO: why doesn't it pop ?
-                info!("Found an end at {end}");
+                warn!("Found an end at {end}");
                 break;
             } else if d.align != b'x' {
                 // The alignment char is wrong
@@ -315,7 +317,7 @@ pub fn parse_data(
                 (i as f64 * increment + start as f64) / 1000000.,
                 u16_to_f64(d.value),
             );
-            info!("{},{},{} : {pos},{val}", i, increment, start);
+            trace!("{},{},{} : {pos},{val}", i, increment, start);
 
             csvdata.push((pos, val));
             writeln!(out, "{},{}", pos, val,)?;

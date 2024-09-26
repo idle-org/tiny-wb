@@ -84,7 +84,7 @@ pub enum TinyUIError {
     #[error("No port was selected")]
     NoPortSelected,
     /// Any Scan Error
-    #[error("An error occured while trying to scan: {0}")]
+    #[error("An error occured while trying to scan: \n => {0}")]
     ScanError(#[from] TinyError),
     /// No connection object was created
     #[error("An error occured while trying to acquire the connection info structure")]

@@ -258,11 +258,8 @@ impl<'a> AppInfo<'a> {
     fn init_progress(&mut self) -> Result<(), TinyUIError> {
         self.menu_items.progress_bar = Some(
             LineGauge::default()
-                // .block(title)
                 .filled_style(Style::default().fg(Color::Blue))
                 .unfilled_style(Style::default().fg(Color::Red))
-                //             .filled_style(Style::default().fg(Color::Blue).bg(Color::Blue))
-                // .unfilled_style(Style::default().fg(Color::Red).bg(Color::Red))
                 .label("Progress:"),
         );
         Ok(())
@@ -304,7 +301,10 @@ impl<'a> AppInfo<'a> {
     /// Draw the progress, updates as the progress is being done
     fn draw_progress(&mut self, frame: &mut Frame<'_>) -> Result<(), TinyUIError> {
         if !self.logged_message {
-            info!("An error was raised {:#?}", self.get_connection_info()?);
+            info!(
+                "First pass of the draw process {:#?}",
+                self.get_connection_info()?
+            );
             self.logged_message = true;
         }
         let [_, main_s, _] = Layout::horizontal([
