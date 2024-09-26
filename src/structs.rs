@@ -161,21 +161,36 @@ pub(crate) enum ConnectionStatus {
     ClosedWithSuccess,
 }
 
+type ScanData = Vec<(f64, f64)>;
+
 #[derive(Debug, Clone)]
 /// All data needed to handle a connection to the TinySA
 pub(crate) struct ConnectionInfo {
+    /// The number of points to scan
     pub(crate) points: usize,
+    /// The baudrate of the connection
     pub(crate) baudrate: u32,
+    /// The Serial port to open for connection
     pub(crate) port: String,
+    /// A mutex to share the progression (over 100)
     progress: Arc<Mutex<usize>>,
+    /// The number of times to repeate a mesurement of a point
     pub(crate) repeat: usize,
-    return_data: Arc<Mutex<Option<Vec<(f64, f64)>>>>,
+    /// A mutex to the result of the scan
+    return_data: Arc<Mutex<Option<ScanData>>>,
+    /// The information of the TinySA
     scan_info: Arc<Mutex<String>>,
+    /// The last scan message (what's happening as the scan goes)
     scan_message: Arc<Mutex<String>>,
+    /// The value to start at (in Hz)
     pub(crate) start: usize,
+    /// The value to stop at (in Hz)
     pub(crate) stop: usize,
+    /// The file name to store all data
     file_name: Arc<Mutex<String>>,
+    /// The connection status
     connection_status: Arc<Mutex<ConnectionStatus>>,
+    /// The last error raised
     pub(crate) error_raised: Arc<Mutex<Option<TinyUIError>>>,
 }
 

@@ -62,6 +62,10 @@ pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), 
     connection_info.update_message("Acquiring version & info");
     let v = send_cmd(&mut port, "version\r", SHORT_WAIT)?;
     let i = send_cmd(&mut port, "info\r", SHORT_WAIT)?;
+    // let f: String = send_cmd(&mut port, "leveloffset\r", SHORT_WAIT)?;
+    // TODO : Also add deviceid, vbat, usart_cfg; threads
+    // TODO: Parse this info in a struct and do a version check
+
     // TODO: have a more thourough version check
     if v.is_empty() || i.is_empty() {
         return Err(TinyError::NoVersionFound);
@@ -196,7 +200,7 @@ fn send_cmd(port: &mut Box<dyn SerialPort>, command: &str, wait: u64) -> Result<
 /// This command will produce unknown results if the output buffer is never read
 unsafe fn send_raw(port: &mut Box<dyn SerialPort>, command: &str) -> Result<(), TinyError> {
     let output = command.as_bytes();
-    let _r = port.write(output).map_err(|e| TinyError::SendError(e))?;
+    let _r = port.write(output).map_err(TinyError::SendError)?;
     Ok(())
 }
 
@@ -280,25 +284,28 @@ pub fn parse_data(
     let mut csvdata = Vec::with_capacity(points);
     if let Some(begining) = memchr::memchr(b'{', &v) {
         let end_tmp = v.len();
-        let data = &v[begining + 1..end_tmp - 4]; // -4 since ch>\r will always be ignored
-                                                  // TODO: Fix weird data
-        info!("The begining looks like :{:?}", &v[begining..begining + 10]);
-        info!("The end looks like :{:?}", &v[end_tmp - 10..end_tmp - 1]);
+        let data = &v[begining + 1..end_tmp]; // -4 since ch>\r will always be ignored
+                                              // TODO: Fix weird data
+        info!(
+            "The begining looks like :{:?}",
+            &v[begining - 1..begining + 9]
+        );
+        info!("The end looks like :{:?}", &v[end_tmp - 10..end_tmp]);
 
         let mut end = end_tmp;
         let chunks_exact = data.chunks_exact(3);
-        if chunks_exact.remainder().is_empty() {
-            return Err(TinyError::ParseEnd(
-                "The data received doesn't have a end char (empty)".to_owned(),
-            ));
-        } else if chunks_exact.remainder()[0] != b'}' {
-            error!("Incorrect right end char {:?}", chunks_exact.remainder());
-            // No end char, bogus
-            return Err(TinyError::ParseEnd(format!(
-                "The returned data doesn't have the right end char expected }} found {:?}",
-                chunks_exact.remainder()
-            )));
-        }
+        // if chunks_exact.remainder().is_empty() {
+        //     return Err(TinyError::ParseEnd(
+        //         "The data received doesn't have a end char (empty)".to_owned(),
+        //     ));
+        // } else if chunks_exact.remainder()[0] != b'}' {
+        //     error!("Incorrect right end char {:?}", chunks_exact.remainder());
+        //     // No end char, bogus
+        //     return Err(TinyError::ParseEnd(format!(
+        //         "The returned data doesn't have the right end char expected }} found {:?}",
+        //         chunks_exact.remainder()
+        //     )));
+        // }
         for (i, slice) in chunks_exact.enumerate() {
             let s: &[u8; 3] = &[slice[0], slice[1], slice[2]];
             let d = DataPoint::unpack(s)?;
@@ -306,25 +313,30 @@ pub fn parse_data(
                 // Found an end and the rest is garbage
                 end = i * 3;
                 // TODO: why doesn't it pop ?
-                warn!("Found an end at {end}");
+                warn!("Found an end at {end} {:?}", &v[end - 4..end]);
                 break;
             } else if d.align != b'x' {
                 // The alignment char is wrong
-                error!("Wrong alignment char");
+                error!("Wrong alignment char expected {} found {}", b'x', d.align);
                 return Err(TinyError::ParseEnd("Wrong alignement char".to_owned()));
             }
             let (pos, val) = (
                 (i as f64 * increment + start as f64) / 1000000.,
                 u16_to_f64(d.value),
             );
-            trace!("{},{},{} : {pos},{val}", i, increment, start);
+            trace!("{} : {pos},{val}", i);
 
             csvdata.push((pos, val));
             writeln!(out, "{},{}", pos, val,)?;
         }
         // TODO: Dont return use mutex
         // info!("debug",format!("{} {}", data.len(), v.len());
-        info!("End at {end} {}", v[end - 1]);
+        info!(
+            "End at {end} expected {} and found {} ({:?})",
+            b'}',
+            v[end - 1],
+            &v[end - 4..=end - 1]
+        );
         Ok((name, csvdata))
     } else {
         Err(TinyError::ParseBeggining("{".to_owned()))

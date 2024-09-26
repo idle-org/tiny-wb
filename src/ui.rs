@@ -415,6 +415,7 @@ impl<'a> AppInfo<'a> {
         Ok(())
     }
 
+    /// Extract a user explaination for an error message
     fn error_message_from_current_error(&self) -> Result<String, TinyUIError> {
         let status_message = match self
             .get_connection_info()?
