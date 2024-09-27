@@ -346,17 +346,18 @@ impl<'a> AppInfo<'a> {
         frame.render_widget(status, title_area);
         frame.render_widget(message, main_area);
         self.menu_items.progress_bar = Some(pb);
-        // TODO: Use the connection status instead
-        if self.get_connection_info()?.get_progress() >= 100 {
-            self.return_data = self.get_connection_info()?.get_return_data()?;
-            self.next_step()?;
-        }
         let st = self.get_connection_info()?.get_connection_status();
-        #[allow(clippy::single_match)]
+        // Change color or some logo ?
         match st {
-            // TODO: Add other failures, skip to draw error ?
             ConnectionStatus::ConnectionFailure => self.next_step()?,
-            _ => (),
+            ConnectionStatus::Uninitialised
+            | ConnectionStatus::ScanStarted
+            | ConnectionStatus::Initialised
+            | ConnectionStatus::Connected => (),
+            ConnectionStatus::ClosedWithSuccess => {
+                self.return_data = self.get_connection_info()?.get_return_data()?;
+                self.next_step()?;
+            }
         }
         Ok(())
     }
@@ -645,18 +646,12 @@ impl<'a> AppInfo<'a> {
                 let connection = self.get_connection_info()?.clone();
                 self.save_config()?;
                 thread::spawn(move || {
-                    let status = scan::scan_with_progress(co);
-                    match status {
-                        Ok(_) => {
-                            connection.update_connection_status(ConnectionStatus::ClosedWithSuccess)
+                    if let Err(status) = scan::scan_with_progress(co) {
+                        log::error!("An error occured during thread exec: {status}");
+                        if !connection.has_error() {
+                            connection.set_error(Some(status.into()));
                         }
-                        Err(e) => {
-                            info!("An error occured during thread exec: {e}");
-                            if !connection.has_error() {
-                                connection.set_error(Some(e.into()));
-                            }
-                            connection.update_connection_status(ConnectionStatus::ConnectionFailure)
-                        }
+                        connection.set_connection_status(ConnectionStatus::ConnectionFailure);
                     }
                 });
             }

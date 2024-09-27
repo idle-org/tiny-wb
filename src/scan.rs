@@ -9,8 +9,8 @@ static LONG_WAIT: u64 = 200;
 /// The standard timeout time
 static TIMEOUT: u64 = 2000;
 
-use crate::structs::TinyError;
-use crate::{info, structs::ConnectionInfo};
+use crate::structs::ConnectionInfo;
+use crate::structs::{ConnectionStatus, TinyError};
 use log::{error, trace, warn};
 use memchr::memmem;
 use packed_struct::prelude::*;
@@ -42,35 +42,29 @@ static EOF: OnceLock<memmem::Finder<'_>> = OnceLock::new();
 /// Scan a specific range and returns the scan result
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), TinyError> {
-    info!("Initializying connection: {:#?}", connection_info);
     let mode = mode_from(connection_info.start, connection_info.stop)?;
-    connection_info.update_message("Opening connection");
-    let port = serialport::new(&connection_info.port, connection_info.baudrate)
-        .timeout(Duration::from_millis(3000))
-        .open();
-    if let Err(e) = port {
-        error!("Connection error {}", e);
-        connection_info.set_error(Some(TinyError::PortConnection(e.clone()).into()));
-        return Err(TinyError::PortConnection(e));
-    }
-    let mut port = port?;
+    let mut port = acquire_port(&connection_info)?;
+
     connection_info.update_message("Initialisation...");
     connection_info.update_progress(5);
     initialize(&mut port);
+    connection_info.set_connection_status(ConnectionStatus::Connected);
 
     connection_info.update_progress(15);
     connection_info.update_message("Acquiring version & info");
     let v = send_cmd(&mut port, "version\r", SHORT_WAIT)?;
     let i = send_cmd(&mut port, "info\r", SHORT_WAIT)?;
-    // let f: String = send_cmd(&mut port, "leveloffset\r", SHORT_WAIT)?;
-    // TODO : Also add deviceid, vbat, usart_cfg; threads
-    // TODO: Parse this info in a struct and do a version check
+    let f = send_cmd(&mut port, "leveloffset\r", SHORT_WAIT)?;
+    let g = send_cmd(&mut port, "vbat\r", SHORT_WAIT)?;
+    let h = send_cmd(&mut port, "usart_cfg\r", SHORT_WAIT)?;
+    let k = send_cmd(&mut port, "threads\r", SHORT_WAIT)?;
+    log::info!("{f}{g}{h}{k}");
 
-    // TODO: have a more thourough version check
+    // TODO: Parse this info in a struct and do a version check
     if v.is_empty() || i.is_empty() {
         return Err(TinyError::NoVersionFound);
     }
-    connection_info.update_info(format!("{}{}", v, i));
+    connection_info.update_info(format!("{v}{i}"));
 
     connection_info.update_message("Setting up repeat");
     send_cmd(
@@ -108,7 +102,7 @@ pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), 
     )?;
 
     connection_info.update_progress(20);
-    connection_info.update_message("Starting scan...");
+    connection_info.update_message("Sweeping...");
     send_cmd(&mut port, "sweep\r", SHORT_WAIT)?;
     send_cmd(
         &mut port,
@@ -120,15 +114,32 @@ pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), 
     )?;
 
     connection_info.update_progress(22);
+    connection_info.update_message("Starting scan...");
+    connection_info.set_connection_status(ConnectionStatus::ScanStarted);
     connection_info.update_filename(scanraw(&mut port, connection_info.clone())?);
 
-    connection_info.update_message("Acquiring version & info");
     connection_info.update_message("Scan finished");
     send_cmd(&mut port, "resume\r", SHORT_WAIT)?;
 
-    // wait_sync(LONG_WAIT);
     connection_info.update_progress(100);
+    connection_info.set_connection_status(ConnectionStatus::ClosedWithSuccess);
     Ok(())
+}
+
+fn acquire_port(connection_info: &ConnectionInfo) -> Result<Box<dyn SerialPort>, TinyError> {
+    let port = {
+        connection_info.update_message("Opening connection");
+        connection_info.set_connection_status(ConnectionStatus::Initialised);
+        let port = serialport::new(&connection_info.port, connection_info.baudrate)
+            .timeout(Duration::from_millis(3000))
+            .open();
+        if let Err(e) = port {
+            connection_info.set_error(Some(TinyError::PortConnection(e.clone()).into()));
+            return Err(TinyError::PortConnection(e));
+        }
+        port
+    }?;
+    Ok(port)
 }
 
 /// Get the mode of operation from the start & stop scan values
@@ -155,8 +166,8 @@ fn initialize(port: &mut Box<dyn SerialPort>) {
     wait_sync(SHORT_WAIT);
     let d = read_port(port);
     if !d.is_empty() {
-        info!(target: "scan", "Pre-init data found");
-        info!(target: "scan", "{:?}", String::from_utf8_lossy(&d).to_string());
+        log::info!(target: "scan", "Pre-init data found");
+        log::info!(target: "scan", "{:?}", String::from_utf8_lossy(&d).to_string());
     }
     wait_sync(SHORT_WAIT)
 }
@@ -286,11 +297,11 @@ pub fn parse_data(
         let end_tmp = v.len();
         let data = &v[begining + 1..end_tmp]; // -4 since ch>\r will always be ignored
                                               // TODO: Fix weird data
-        info!(
+        log::info!(
             "The begining looks like :{:?}",
             &v[begining - 1..begining + 9]
         );
-        info!("The end looks like :{:?}", &v[end_tmp - 10..end_tmp]);
+        log::info!("The end looks like :{:?}", &v[end_tmp - 10..end_tmp]);
 
         let mut end = end_tmp;
         let chunks_exact = data.chunks_exact(3);
@@ -331,7 +342,7 @@ pub fn parse_data(
         }
         // TODO: Dont return use mutex
         // info!("debug",format!("{} {}", data.len(), v.len());
-        info!(
+        log::info!(
             "End at {end} expected {} and found {} ({:?})",
             b'}',
             v[end - 1],

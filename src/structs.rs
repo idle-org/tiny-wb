@@ -7,13 +7,14 @@ use std::{
 };
 
 use flexi_logger::FlexiLoggerError;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
+use log;
+use serde;
+use thiserror;
 
 use crate::ui_struct::AppInfo;
 
 /// The most common error, exposed to the lib user and end used
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum TinyError {
     /// An error occured while receiving the raw data and '{' couldn't be found
     #[error("Couldn't parse the beggining of the data ({0})")]
@@ -69,7 +70,7 @@ pub(crate) enum InputDirection {
 }
 
 /// All implementation of errors happening while in the UI
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum TinyUIError {
     /// An error due to bad menuing implementation
     #[error("An error occured while selecting a menu item")]
@@ -100,7 +101,7 @@ pub enum TinyUIError {
     SerializeError(#[from] toml::ser::Error),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub(crate) struct SavedConfig {
     /// The default com port
     pub(crate) port: String,
@@ -151,14 +152,15 @@ impl SavedConfig {
 pub(crate) enum ConnectionStatus {
     /// The connection was created with no initialisation data
     Uninitialised,
-    // /// The connection has initialisation data but wasn't established
-    // Initialised,
-    // /// The connection was established
-    // Connected,
+    /// The connection has initialisation data but wasn't established
+    Initialised,
+    /// The connection was established
+    Connected,
     /// The connection coudn't be done, with a string explaining the error
     ConnectionFailure,
     /// The connection is closed and the connection was a succes
     ClosedWithSuccess,
+    ScanStarted,
 }
 
 type ScanData = Vec<(f64, f64)>;
@@ -219,16 +221,19 @@ impl ConnectionInfo {
 
     /// Updates the generic scan message
     pub(crate) fn update_message(&self, message: &'static str) {
+        log::trace!("Message: {message}");
         *self.scan_message.lock().unwrap() = message.to_string();
     }
 
     /// Updates the scan progress
     pub(crate) fn update_progress(&self, progress: usize) {
+        log::trace!("Progress: {progress}");
         *self.progress.lock().unwrap() = progress;
     }
 
     /// Update the information of the TinySA
     pub(crate) fn update_info(&self, message: String) {
+        log::info!("Info: {message}");
         *self.scan_info.lock().unwrap() = message.to_string();
     }
 
@@ -276,19 +281,21 @@ impl ConnectionInfo {
             .ok_or(TinyUIError::NoReturnData)
     }
 
-    /// Updates the connection status
-    pub(crate) fn update_connection_status(&self, new_status: ConnectionStatus) {
-        *self.connection_status.lock().unwrap() = new_status
-    }
-
     /// Set an error
     pub(crate) fn set_error(&self, e: Option<TinyUIError>) {
+        log::error!("Error: {e:?}");
         *self.error_raised.lock().unwrap() = e;
     }
 
     /// Wether an error has been raised
     pub(crate) fn has_error(&self) -> bool {
         self.error_raised.lock().unwrap().is_some()
+    }
+
+    /// Manually sets the connections status
+    pub(crate) fn set_connection_status(&self, status: ConnectionStatus) {
+        log::info!("Status: {status:?}");
+        *self.connection_status.lock().unwrap() = status;
     }
 
     // pub(crate) fn get_error(&self) -> &Option<TinyError> {

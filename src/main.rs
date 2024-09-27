@@ -16,7 +16,7 @@ use structs::TinyError;
 use ui_struct::AppInfo;
 
 use flexi_logger::{FileSpec, Logger, WriteMode};
-use log::info;
+use log;
 
 fn main() -> Result<(), TinyError> {
     let _logger = Logger::try_with_str("info, my::critical::module=trace")
@@ -25,7 +25,7 @@ fn main() -> Result<(), TinyError> {
         .write_mode(WriteMode::BufferAndFlush)
         .start()?;
 
-    info!(target:"info","Logging started");
+    log::info!(target:"info","Logging started");
     color_eyre::install()?;
     let terminal = ratatui::init();
     // setup_panic!();
