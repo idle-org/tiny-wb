@@ -40,7 +40,6 @@ pub struct DataPoint {
 static EOF: OnceLock<memmem::Finder<'_>> = OnceLock::new();
 
 /// Scan a specific range and returns the scan result
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), TinyError> {
     let mode = mode_from(connection_info.start, connection_info.stop)?;
     let mut port = acquire_port(&connection_info)?;

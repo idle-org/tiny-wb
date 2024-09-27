@@ -1,43 +1,16 @@
 //! The (minimal) user interface to control the program
-#![allow(unused_imports)]
-use clap::builder::Resettable;
-use color_eyre::{eyre::Context, owo_colors::OwoColorize, Section};
-use core::{panic, time};
 use log::info;
 use ratatui::{
-    buffer::Buffer,
-    crossterm::{
-        event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
-        style::Print,
-    },
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
-    prelude::BlockExt,
-    style::{
-        palette::tailwind::{BLUE, GREEN, SLATE},
-        Color, Modifier, Style, Styled, Stylize,
-    },
-    symbols::{self, Marker},
-    text::Line,
-    widgets::{
-        block::Title, Axis, Block, Borders, Chart, Dataset, GraphType, HighlightSpacing, LineGauge,
-        List, ListDirection, ListItem, ListState, Padding, Paragraph, ScrollDirection,
-        StatefulWidget, Widget, Wrap,
-    },
+    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+    layout::{Constraint, Layout, Rect},
+    style::{Color, Modifier, Style, Stylize},
+    symbols::Marker,
+    widgets::{Axis, Block, Chart, Dataset, GraphType, LineGauge, List, Paragraph, Wrap},
     DefaultTerminal, Frame,
 };
 use serialport::SerialPortInfo;
-use std::{
-    borrow::{Borrow, BorrowMut},
-    cmp::min,
-    fmt::Pointer,
-    iter::Iterator,
-    sync::{Arc, Mutex},
-    thread,
-    time::{Duration, Instant},
-};
-use strum::{EnumCount, EnumIter, EnumProperty};
-use strum::{FromRepr, IntoEnumIterator};
-use tui_textarea::{Input, Key, TextArea};
+use std::{thread, time::Duration};
+use strum::EnumCount;
 
 use crate::{
     mleft, mright, scan,
@@ -251,7 +224,9 @@ impl<'a> AppInfo<'a> {
 
         self.update_color()?;
         frame.render_widget(
-            Paragraph::new(self.status_message.clone()).block(Block::bordered()),
+            Paragraph::new(self.status_message.clone())
+                .wrap(Wrap { trim: true })
+                .block(Block::bordered()),
             title_area,
         );
         self.render_footer(frame, status_area);
@@ -312,7 +287,9 @@ impl<'a> AppInfo<'a> {
         frame.render_stateful_widget(list_ports, area_ports, &mut self.port_list.state);
         frame.render_stateful_widget(list_baudrates, area_baud, &mut self.baudrate.state);
         frame.render_widget(
-            Paragraph::new(self.status_message.clone()).block(Block::bordered()),
+            Paragraph::new(self.status_message.clone())
+                .wrap(Wrap { trim: true })
+                .block(Block::bordered()),
             title_area,
         );
         self.render_footer(frame, status_area);
@@ -349,6 +326,7 @@ impl<'a> AppInfo<'a> {
                 .style(SELECTED_COLOR);
             let message = self.get_connection_info()?.get_scan_info();
             let message = Paragraph::new(message.clone())
+                .wrap(Wrap { trim: true })
                 .block(Block::bordered().title("TinySA Info"))
                 .style(SELECTED_COLOR);
             let pb = self
@@ -411,6 +389,7 @@ impl<'a> AppInfo<'a> {
         let conn_status = self.get_connection_info()?.get_connection_status();
         let status_message = self.error_message_from_current_error()?;
         let status = Paragraph::new(status_message)
+            .wrap(Wrap { trim: true })
             .block(Block::bordered().title("Status"))
             .style(Color::Red);
         let mut additional = String::new();
@@ -429,6 +408,7 @@ impl<'a> AppInfo<'a> {
             self.get_connection_info()?.get_scan_message(),
             additional
         ))
+        .wrap(Wrap { trim: true })
         .block(Block::bordered().title("Status"));
         let footer = Paragraph::new("Press ↲ or q to exit".to_string()).centered();
         frame.render_widget(status, title_area);

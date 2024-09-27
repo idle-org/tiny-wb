@@ -133,7 +133,7 @@ impl Default for AppState {
 macro_rules! mright {
     ($v:ident, $cname:ident,$fname:ident) => {
         Some(AppState::$cname(
-            $fname::from_repr(min(($v + 1), $fname::COUNT - 1))
+            $fname::from_repr(std::cmp::min(($v + 1), $fname::COUNT - 1))
                 .ok_or(TinyUIError::MenuSelectionError)?,
         ))
     };
