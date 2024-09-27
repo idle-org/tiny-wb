@@ -1,6 +1,6 @@
 [package]
 name = "tiny-wb"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
@@ -8,9 +8,9 @@ chrono = "0.4.38"
 clap = { version = "4.5.17", features = ["derive"] }
 color-eyre = "0.6.3"
 flexi_logger = "0.29.0"
-human-panic = "2.0.1"
-# log = { version = "0.4.22", features = ["max_level_debug", "release_max_level_error"] }
-log = { version = "0.4.22"}
+# human-panic = "2.0.1"
+log = { version = "0.4.22", features = ["release_max_level_error"] }
+# log = { version = "0.4.22"}
 memchr = "2.7.4"
 once_cell = "1.19.0"
 packed_struct = "0.10.1"
@@ -37,6 +37,15 @@ inherits = "release"
 opt-level = "z"
 debug = false
 strip = true
+lto = true
+codegen-units = 1
+incremental = false
+panic = "abort"
+
+[profile.windows-dev]
+inherits = "dev"
+opt-level = "z"
+debug = 0
 lto = true
 codegen-units = 1
 incremental = false
