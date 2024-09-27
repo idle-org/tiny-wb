@@ -151,6 +151,11 @@ impl<'a> AppInfo<'a> {
                 )
                 .repeat_highlight_symbol(true),
         );
+        self.status_message = format!(
+            "TinyWB version {}-{}, by the Dandaedre 🄯 2024",
+            env!("CARGO_PKG_VERSION"),
+            env!("GIT_HASH")
+        );
         self.update_color()
     }
 
@@ -167,20 +172,26 @@ impl<'a> AppInfo<'a> {
 
     /// Draw the final configuration labels
     fn draw_final_config(&mut self, frame: &mut Frame<'_>) -> Result<(), TinyUIError> {
-        let [title_area, main_area, _, status_area] = Layout::vertical([
-            Constraint::Length(2),
+        let [_, spaced, _] = Layout::horizontal([
+            Constraint::Min(7),
+            Constraint::Percentage(100),
+            Constraint::Min(7),
+        ])
+        .areas(frame.area());
+        let [_, title_area, _, main_area, _, status_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
             Constraint::Length(3),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
-        .areas(frame.area());
-        let [_, area_minf, area_maxf, area_points, repeat, _] = Layout::horizontal([
-            Constraint::Min(7),
+        .areas(spaced);
+        let [area_minf, area_maxf, area_points, repeat] = Layout::horizontal([
             Constraint::Percentage(25),
             Constraint::Percentage(25),
             Constraint::Percentage(25),
             Constraint::Percentage(25),
-            Constraint::Min(7),
         ])
         .areas(main_area);
         // TODO: Move this in the color update
@@ -239,7 +250,10 @@ impl<'a> AppInfo<'a> {
         );
 
         self.update_color()?;
-        frame.render_widget(Paragraph::new(self.status_message.clone()), title_area);
+        frame.render_widget(
+            Paragraph::new(self.status_message.clone()).block(Block::bordered()),
+            title_area,
+        );
         self.render_footer(frame, status_area);
         Ok(())
     }
@@ -267,19 +281,23 @@ impl<'a> AppInfo<'a> {
 
     /// Draw the config info
     fn draw_config(&mut self, frame: &mut Frame) -> Result<(), TinyUIError> {
-        let [title_area, main_area, status_area] = Layout::vertical([
-            Constraint::Length(2),
+        let [_, spaced, _] = Layout::horizontal([
+            Constraint::Min(7),
+            Constraint::Percentage(100),
+            Constraint::Min(7),
+        ])
+        .areas(frame.area());
+        let [_, title_area, _, main_area, status_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
             Constraint::Min(10),
             Constraint::Length(1),
         ])
-        .areas(frame.area());
-        let [_, area_ports, area_baud, _] = Layout::horizontal([
-            Constraint::Min(7),
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
-            Constraint::Min(7),
-        ])
-        .areas(main_area);
+        .areas(spaced);
+        let [area_ports, area_baud] =
+            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .areas(main_area);
         let list_ports = self
             .menu_items
             .portlist
@@ -293,7 +311,10 @@ impl<'a> AppInfo<'a> {
         // self.status_message = format!("{:?} ", self.flow_state);
         frame.render_stateful_widget(list_ports, area_ports, &mut self.port_list.state);
         frame.render_stateful_widget(list_baudrates, area_baud, &mut self.baudrate.state);
-        frame.render_widget(Paragraph::new(self.status_message.clone()), title_area);
+        frame.render_widget(
+            Paragraph::new(self.status_message.clone()).block(Block::bordered()),
+            title_area,
+        );
         self.render_footer(frame, status_area);
         Ok(())
     }
