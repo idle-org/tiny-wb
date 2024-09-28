@@ -40,6 +40,7 @@ pub struct DataPoint {
 static EOF: OnceLock<memmem::Finder<'_>> = OnceLock::new();
 
 /// Scan a specific range and returns the scan result
+// TEST: CLEANUP
 pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), TinyError> {
     let mode = mode_from(connection_info.start, connection_info.stop)?;
     let mut port = acquire_port(&connection_info)?;
@@ -125,6 +126,8 @@ pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), 
     Ok(())
 }
 
+/// Acquire a port from the portname/baudrate of the connection info
+// TEST: Abstract port / Hard
 fn acquire_port(connection_info: &ConnectionInfo) -> Result<Box<dyn SerialPort>, TinyError> {
     let port = {
         connection_info.update_message("Opening connection");
@@ -142,6 +145,7 @@ fn acquire_port(connection_info: &ConnectionInfo) -> Result<Box<dyn SerialPort>,
 }
 
 /// Get the mode of operation from the start & stop scan values
+// TEST: Easy
 fn mode_from(start: usize, stop: usize) -> Result<String, TinyError> {
     if start > stop {
         return Err(TinyError::BadScanFrequencies(format!(
@@ -161,6 +165,7 @@ fn mode_from(start: usize, stop: usize) -> Result<String, TinyError> {
 
 /// A (lame) function used for initialisation:
 /// Wait's for a whole timeout for data stuck in the buffer and dumps it
+// TEST: Abstract port
 fn initialize(port: &mut Box<dyn SerialPort>) {
     wait_sync(SHORT_WAIT);
     let d = read_port(port);
@@ -172,11 +177,13 @@ fn initialize(port: &mut Box<dyn SerialPort>) {
 }
 
 /// Bad synchronisation method to ensure data is truthfully sent/received
+// TEST: Abstract port
 fn wait_sync(duration: u64) {
     thread::sleep(Duration::from_millis(duration));
 }
 
 /// Scan raw frequencies
+// TEST: Abstract port
 fn scanraw(
     port: &mut Box<dyn SerialPort>,
     connection_info: ConnectionInfo,
@@ -208,6 +215,7 @@ fn send_cmd(port: &mut Box<dyn SerialPort>, command: &str, wait: u64) -> Result<
 
 /// Send a command without reading the output buffer
 /// This command will produce unknown results if the output buffer is never read
+// TEST: Abstract port
 unsafe fn send_raw(port: &mut Box<dyn SerialPort>, command: &str) -> Result<(), TinyError> {
     let output = command.as_bytes();
     let _r = port.write(output).map_err(TinyError::SendError)?;
@@ -215,6 +223,7 @@ unsafe fn send_raw(port: &mut Box<dyn SerialPort>, command: &str) -> Result<(), 
 }
 
 /// Reads from port and tries to convert it to string with loss
+// TEST: Abstract port
 fn read_utf8(port: &mut Box<dyn SerialPort>) -> String {
     String::from_utf8_lossy(&read_port(port)).to_string()
 }
@@ -245,6 +254,7 @@ fn read_port_with_progress(
 
 /// Read port without updating progress
 // TODO: Find a way to avoid code duplication
+// TEST: Abstract port
 fn read_port(port: &mut Box<dyn SerialPort>) -> Vec<u8> {
     let mut serial_buf: Vec<u8> = vec![0; 256];
     let mut res = Vec::new();
@@ -263,6 +273,7 @@ fn read_port(port: &mut Box<dyn SerialPort>) -> Vec<u8> {
 /// Waits the normal start Character '{' and begins treating data as normal
 ///
 /// Returns a struct summerizing the information processed
+// TEST: Abstract port
 fn read_scanraw(
     port: &mut Box<dyn SerialPort>,
     connection_info: ConnectionInfo,
@@ -282,6 +293,7 @@ fn read_scanraw(
 
 /// A utility function used for parsing the raw data of a scan
 // TODO: Split save data to another function
+// TEST: MANDATOY
 pub fn parse_data(
     v: Vec<u8>,
     points: usize,
@@ -354,6 +366,8 @@ pub fn parse_data(
 }
 
 /// Utility function converting the received data as u16 to float data
+// TEST: Easy
+#[inline]
 fn u16_to_f64(v: u16) -> f64 {
     (v as f64) / 32. - OFFSET as f64
 }

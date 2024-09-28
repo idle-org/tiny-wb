@@ -18,6 +18,7 @@ pub(crate) const SELECTED_COLOR: Color = Color::White;
 /// Color of an unselected item
 pub(crate) const UNSELECTED_COLOR: Color = Color::DarkGray;
 
+// TEST: Easy
 /// This struct holds the current state of the app.
 #[derive(Debug)]
 pub(crate) struct AppInfo<'a> {
@@ -49,6 +50,7 @@ pub(crate) struct AppInfo<'a> {
     pub(crate) logged_message: bool,
 }
 
+// TEST: Easy
 #[derive(Debug)]
 pub(crate) struct UIUsize {
     /// Current value held by the usize
@@ -61,6 +63,7 @@ pub(crate) struct UIUsize {
     max_clamp: usize,
 }
 
+// TEST: Easy
 impl UIUsize {
     /// Change the value depending on selection
     pub(crate) fn change_value(&mut self, direction: InputDirection) {
@@ -107,6 +110,7 @@ impl UIUsize {
     }
 }
 
+// TEST: Easy
 #[derive(Debug)]
 /// The inner state of the app, useful for display and keystrokes
 pub(crate) enum AppState {
@@ -122,12 +126,14 @@ pub(crate) enum AppState {
     Error,
 }
 
+// TEST: Easy
 impl Default for AppState {
     fn default() -> Self {
         Self::InitialConfig(SelectedConfig::default())
     }
 }
 
+// TEST ?
 #[macro_export]
 /// Shortcut for move right
 macro_rules! mright {
@@ -139,6 +145,7 @@ macro_rules! mright {
     };
 }
 
+// TEST ?
 #[macro_export]
 /// Shortcut to move left
 macro_rules! mleft {
@@ -152,6 +159,8 @@ macro_rules! mleft {
         }
     };
 }
+
+// TEST ? Do more
 /// The selected item in the config
 #[derive(Debug, EnumCount, FromRepr, Clone, Copy)]
 pub(crate) enum SelectedConfig {
@@ -169,6 +178,7 @@ impl Default for SelectedConfig {
     }
 }
 
+// TEST ?
 /// The selected item in the final menu
 #[derive(Debug, EnumCount, FromRepr, Copy, Clone)]
 pub(crate) enum SelectedFinalConfig {
@@ -190,6 +200,7 @@ impl Default for SelectedFinalConfig {
     }
 }
 
+// TEST: ?
 /// The list of all baudrates selectables
 #[derive(Debug)]
 pub(crate) struct BaudRateList {
@@ -200,6 +211,7 @@ pub(crate) struct BaudRateList {
     /// The inner state of the widget
     pub(crate) state: ListState,
 }
+// TEST: Easy
 impl BaudRateList {
     /// Convert into a vec of strings, this is extremely expensive and shouldn't be done that way
     pub(crate) fn to_vecstr(&self) -> Vec<String> {
@@ -249,6 +261,7 @@ impl BaudRateList {
     }
 }
 
+// TEST: Easy
 impl Default for BaudRateList {
     fn default() -> Self {
         Self {
@@ -258,6 +271,8 @@ impl Default for BaudRateList {
     }
 }
 
+// TEST: Easy
+// TODO: Consider changing to vec
 /// A list of possible baudrates
 #[derive(Debug, EnumIter, Copy, Clone)]
 pub(crate) enum BaudRate {
@@ -273,6 +288,7 @@ pub(crate) enum BaudRate {
     BAUD3000000 = 3_000_000,
 }
 
+// TEST: Easy
 /// A wrapper over the list of ports
 #[derive(Debug)]
 pub(crate) struct PortList {
@@ -284,6 +300,7 @@ pub(crate) struct PortList {
     pub(crate) state: ListState,
 }
 
+// TEST: Easy
 impl PortList {
     /// Make a port list from a serial reading
     pub(crate) fn from_serial(
@@ -319,6 +336,7 @@ impl PortList {
     }
 }
 
+// TEST: Easy
 #[derive(Debug, Default)]
 /// The static list of all menu items
 pub(crate) struct MenuItems<'a> {
@@ -336,6 +354,7 @@ pub(crate) struct MenuItems<'a> {
     // pub(crate) graph: Option<Chart<'a>>,
 }
 
+// TEST: Easy
 /// Try to guess the best port to preselect
 fn find_best_port(ports: &[String], saved_config: &Result<SavedConfig, TinyError>) -> usize {
     let mut best_ports = vec!["/dev/ttyACM0", "COM3", "COM5", "/dev/ttyS16"];
@@ -354,6 +373,7 @@ fn find_best_port(ports: &[String], saved_config: &Result<SavedConfig, TinyError
     0
 }
 
+// TEST: Doable
 impl<'a> AppInfo<'a> {
     /// Put an item a specified color
     pub(crate) fn change_color(
@@ -374,6 +394,7 @@ impl<'a> AppInfo<'a> {
     }
 }
 
+// TEST: Hard
 impl<'a> AppInfo<'a> {
     /// Update all the colors
     pub(crate) fn update_color(&mut self) -> Result<(), TinyUIError> {

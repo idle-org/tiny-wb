@@ -23,6 +23,9 @@ use crate::{
     },
 };
 
+// TEST: Hard
+// TODO: Split flow/tui logic from coding logic
+// Isolate impossible to test to one impl
 impl<'a> AppInfo<'a> {
     /// Create a new app with the port info available
     pub(crate) fn new(info: Vec<SerialPortInfo>) -> Self {

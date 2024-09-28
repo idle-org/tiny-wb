@@ -69,6 +69,7 @@ pub(crate) enum InputDirection {
     Left,
 }
 
+// TEST: Easy
 /// All implementation of errors happening while in the UI
 #[derive(thiserror::Error, Debug)]
 pub enum TinyUIError {
@@ -101,6 +102,7 @@ pub enum TinyUIError {
     SerializeError(#[from] toml::ser::Error),
 }
 
+// TEST: Easy
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub(crate) struct SavedConfig {
     /// The default com port
@@ -116,6 +118,7 @@ pub(crate) struct SavedConfig {
     /// The default number of repeat per point
     pub(crate) repeat: usize,
 }
+// TEST: Easy
 impl SavedConfig {
     /// Create a config from file or returns an error
     pub(crate) fn new() -> Result<Self, TinyError> {
@@ -147,6 +150,7 @@ impl SavedConfig {
     }
 }
 
+// TEST: Easy
 /// The various status the connection can take
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ConnectionStatus {
@@ -156,15 +160,17 @@ pub(crate) enum ConnectionStatus {
     Initialised,
     /// The connection was established
     Connected,
+    /// The scan was started
+    ScanStarted,
     /// The connection coudn't be done, with a string explaining the error
     ConnectionFailure,
     /// The connection is closed and the connection was a succes
     ClosedWithSuccess,
-    ScanStarted,
 }
 
 type ScanData = Vec<(f64, f64)>;
 
+// TEST: Easy
 #[derive(Debug, Clone)]
 /// All data needed to handle a connection to the TinySA
 pub(crate) struct ConnectionInfo {
@@ -196,6 +202,7 @@ pub(crate) struct ConnectionInfo {
     pub(crate) error_raised: Arc<Mutex<Option<TinyUIError>>>,
 }
 
+// TEST: Easy
 impl ConnectionInfo {
     /// Create the initial connection containing only the initial mutex for error collection
     pub(crate) fn new() -> Self {
@@ -303,6 +310,7 @@ impl ConnectionInfo {
     // }
 }
 
+// TEST: Easy
 impl Default for ConnectionInfo {
     fn default() -> Self {
         Self {
