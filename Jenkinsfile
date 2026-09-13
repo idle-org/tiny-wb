@@ -5,8 +5,20 @@ pipeline {
     agent { label 'rust_no_docker' }
 
     environment {
-        CARGO_TERM_COLOR = 'always'
+        // Jenkins console currently does not render Cargo ANSI colors cleanly.
+        CARGO_TERM_COLOR = 'never'
+
         RUST_BACKTRACE = '1'
+
+        // Isolate CI from any global ~/.cargo/config* on the worker.
+        CARGO_HOME = "${WORKSPACE}/.ci-cargo-home"
+
+        // Keep CI build artifacts separate from normal/local builds.
+        CARGO_TARGET_DIR = "${WORKSPACE}/target-ci"
+
+        // Build for a generic x86-64 baseline to avoid SIGILL on the worker.
+        // Keep the project's desired lld linker.
+        RUSTFLAGS = '-Ctarget-cpu=x86-64 -Clink-arg=-fuse-ld=lld'
     }
 
     stages {
@@ -43,20 +55,29 @@ pipeline {
                     rustup default stable
 
                     # ---------------------------------------------------------
-                    # LLVM lld
-                    #
-                    # tiny-wb/.cargo/config.toml contains:
-                    #
-                    # [build]
-                    # rustflags = ["-Clink-arg=-fuse-ld=lld"]
+                    # LLD
                     # ---------------------------------------------------------
 
                     if ! command -v ld.lld >/dev/null 2>&1; then
-                        echo "lld not found — installing LLVM linker..."
+                        echo "lld not found — installing it..."
                         pkg install -y lld
                     else
                         echo "lld already installed."
                     fi
+
+                    # ---------------------------------------------------------
+                    # Fresh isolated CI directories
+                    # ---------------------------------------------------------
+
+                    rm -rf "${CARGO_HOME}"
+                    mkdir -p "${CARGO_HOME}"
+
+                    rm -rf "${CARGO_TARGET_DIR}"
+                    mkdir -p "${CARGO_TARGET_DIR}"
+
+                    # ---------------------------------------------------------
+                    # Environment information
+                    # ---------------------------------------------------------
 
                     echo
                     echo "Rust:"
@@ -80,7 +101,23 @@ pipeline {
 
                     echo
                     echo "LLD:"
-                    ld.lld --version || true
+                    ld.lld --version
+
+                    echo
+                    echo "Rust flags:"
+                    echo "${RUSTFLAGS}"
+
+                    echo
+                    echo "Cargo color mode:"
+                    echo "${CARGO_TERM_COLOR}"
+
+                    echo
+                    echo "Host:"
+                    uname -a
+
+                    echo
+                    echo "Rust target:"
+                    rustc -vV
                 '''
             }
         }
@@ -153,7 +190,7 @@ pipeline {
                         --release \
                         --all-features
 
-                    BINARY="target/release/tiny-wb"
+                    BINARY="${CARGO_TARGET_DIR}/release/tiny-wb"
 
                     if [ ! -f "${BINARY}" ]; then
                         echo "ERROR: expected release binary not found:" >&2
@@ -177,15 +214,9 @@ pipeline {
                 sh '''
                     set -eu
 
-                    BINARY="target/release/tiny-wb"
+                    BINARY="${CARGO_TARGET_DIR}/release/tiny-wb"
 
                     echo "Smoke-testing CLI..."
-
-                    # This is a TUI talking to serial hardware, so CI should
-                    # not attempt to start the interactive interface.
-                    #
-                    # --help is enough to verify that the executable starts
-                    # correctly and that clap initialization succeeds.
 
                     "${BINARY}" --help >/dev/null
 
@@ -230,6 +261,17 @@ pipeline {
             )
 
             echo '⚠️ tiny-wb CI is unstable.'
+        }
+
+        always {
+            sh '''
+                echo "Cleaning CI configuration..."
+
+                rm -rf .ci-cargo-home
+
+                # Keep target-ci so the produced binary remains available
+                # for inspection after the Jenkins build.
+            '''
         }
     }
 }
