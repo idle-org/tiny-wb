@@ -133,3 +133,77 @@ This is intentionally “semi-hardened” CI. The repository does not add
 `cargo-vet`, SBOM generation, dependency vendoring, registry proxies,
 provenance/signing systems, or additional security scanners. Expanding that
 scope needs a separate design and maintenance decision.
+
+## CI badges and coverage
+
+The README references version, tests and line coverage at these mutable URLs:
+
+- https://assets.dandaedre.com/coverage/idle-org/tiny-wb/main/version.svg
+- https://assets.dandaedre.com/coverage/idle-org/tiny-wb/main/test.svg
+- https://assets.dandaedre.com/coverage/idle-org/tiny-wb/main/coverage.svg
+
+Repository identity and `main` were verified against the origin remote, its
+HEAD, and Gitea repository metadata. The version comes from `Cargo.toml` via
+`cargo metadata --no-deps --locked --format-version 1`, never a Jenkins constant.
+
+Coverage uses pinned `cargo-llvm-cov` 0.6.16 and Rust's `llvm-tools-preview`
+component. The worker also needs `jq`. Install the prerequisites and run:
+
+```console
+rustup component add llvm-tools-preview
+cargo install --locked --version 0.6.16 cargo-llvm-cov
+mkdir -p coverage
+cargo coverage
+```
+
+The exact alias is tracked in `.cargo/config.toml` and expands to:
+
+```console
+cargo llvm-cov --locked --all-targets --all-features --json --summary-only --fail-under-lines 0 --output-path coverage/summary.json
+```
+
+The enforced line-coverage floor is **0%**: no Rust tests currently exist.
+Local measurement on 2026-10-04 was **0 of 1,024 lines (0%)**.
+This is an honest initial baseline, not evidence of application correctness.
+No ordinary production sources are excluded. Raise the floor as meaningful
+protocol and application tests are introduced. A passing test badge means the
+required test commands succeeded, even when the Rust harness contains zero tests.
+
+`scripts/collect-coverage.sh` runs that command, validates the overall line
+percentage from temporary `coverage/summary.json`, renders the coverage badge,
+and deletes the summary, including on failure. Jenkins then creates the current
+build's test and coverage markers only after both required test runs succeed.
+The release smoke test remains a nonfatal diagnostic.
+
+At checkout, CI recreates ignored `coverage/` to remove stale workspace state.
+In `post { cleanup { ... } }`, it uses only current-build markers to choose test
+status and retain measured coverage, falling back to `failing` and neutral `-%`
+when markers are absent. Cleanup reads the version, removes the summary and
+markers, validates and archives exactly `coverage/version.svg`,
+`coverage/test.svg` and `coverage/coverage.svg` with fingerprints and
+`allowEmptyArchive: false`. A later lint/build failure can retain successful
+test/coverage results; these badges report those individual stages.
+
+Only `main` publishes to `/mnt/assets/coverage/idle-org/tiny-wb/main/`, with
+`/mnt/assets/coverage` passed as the complete publication root. Publication
+runs in cleanup even after failure. Each file is replaced atomically, with
+0755 new directories and 0644 files; the script never prunes shared assets.
+Concurrent builds of this job are disabled to avoid workspace/marker races.
+
+The publication predicate requires a Jenkins **multibranch** job's `BRANCH_NAME`
+and excludes change requests and tags. The actual job configuration is not in
+this repository and remains unverified. When `BRANCH_NAME` is absent,
+publication is skipped with a diagnostic; generation and archival still run.
+Verify the job type and its branch variable before deployment. Real Jenkins
+execution, access to the asset mount, and public URL retrieval are separate
+unverified deployment checkpoints; README links alone do not make badges live.
+
+Server configuration is external: mount public assets read-only, disable
+directory listing, serve SVG with a restrictive Content-Security-Policy, and
+revalidate mutable URLs or give them a short cache lifetime.
+
+Run isolated badge checks with `python3 scripts/test-badges.py`. The renderer
+was copied from `Dandaedre/agent-tasks` at revision
+`fb9d8f7d16f100c2d1377f23394a2302eac9ab18` (retrieved 2026-10-04), with local
+fixes for literal newlines in width measurement, oversized integer validation,
+unique temporary files, directory-output rejection and signal termination.

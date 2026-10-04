@@ -3,3 +3,7 @@ rustflags = ["-Clink-arg=-fuse-ld=lld"]
 
 [resolver]
 incompatible-rust-versions = "fallback"
+
+[alias]
+# No Rust tests exist yet: report the real baseline without excluding source.
+coverage = "llvm-cov --locked --all-targets --all-features --json --summary-only --fail-under-lines 0 --output-path coverage/summary.json"

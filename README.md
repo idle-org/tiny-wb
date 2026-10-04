@@ -1,5 +1,9 @@
 # tiny-wb
 
+![Version](https://assets.dandaedre.com/coverage/idle-org/tiny-wb/main/version.svg)
+![Tests](https://assets.dandaedre.com/coverage/idle-org/tiny-wb/main/test.svg)
+![Coverage](https://assets.dandaedre.com/coverage/idle-org/tiny-wb/main/coverage.svg)
+
 `tiny-wb` is an interactive terminal application that acquires a frequency
 sweep from a tinySA over its USB serial console and exports the result as CSV.
 It is written in Rust and uses Ratatui for the interface.

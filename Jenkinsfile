@@ -4,6 +4,11 @@
 pipeline {
     agent { label 'rust_nodocker' }
 
+    options {
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+    }
+
     environment {
         // Jenkins does not render Cargo ANSI sequences cleanly.
         CARGO_TERM_COLOR = 'never'
@@ -16,6 +21,11 @@ pipeline {
         // Supply-chain tools are pinned for reproducible policy behavior.
         CARGO_AUDIT_VERSION = '0.22.2'
         CARGO_DENY_VERSION = '0.20.2'
+        CARGO_LLVM_COV_VERSION = '0.6.16'
+        BADGE_ROOT = '/mnt/assets/coverage'
+        BADGE_OWNER = 'idle-org'
+        BADGE_PROJECT = 'tiny-wb'
+        BADGE_BRANCH = 'main'
 
         // Keep CI build products separate.
         CARGO_TARGET_DIR = "${WORKSPACE}/target-ci"
@@ -30,6 +40,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
+                sh 'rm -rf coverage && mkdir coverage'
                 checkout scm
 
                 sh '''
@@ -56,7 +67,8 @@ pipeline {
                     rustup toolchain install stable \
                         --profile minimal \
                         --component rustfmt \
-                        --component clippy
+                        --component clippy \
+                        --component llvm-tools-preview
 
                     rustup toolchain install "${MSRV}" \
                         --profile minimal
@@ -75,6 +87,15 @@ pipeline {
                         cargo install --locked \
                             --version "${CARGO_DENY_VERSION}" \
                             cargo-deny
+                    fi
+
+                    command -v jq >/dev/null 2>&1 || {
+                        echo 'ERROR: jq must be installed on this worker.' >&2
+                        exit 1
+                    }
+                    INSTALLED_COVERAGE_VERSION="$(cargo llvm-cov --version 2>/dev/null | awk '{print $NF}' || true)"
+                    if [ "${INSTALLED_COVERAGE_VERSION}" != "${CARGO_LLVM_COV_VERSION}" ]; then
+                        cargo install --locked --version "${CARGO_LLVM_COV_VERSION}" cargo-llvm-cov
                     fi
 
                     # ---------------------------------------------------------
@@ -234,6 +255,17 @@ pipeline {
             }
         }
 
+        stage('Coverage') {
+            steps {
+                sh '''
+                    set -eu
+                    scripts/collect-coverage.sh
+                    touch "coverage/.tests-passed-${BUILD_NUMBER}"
+                    touch "coverage/.coverage-ready-${BUILD_NUMBER}"
+                '''
+            }
+        }
+
         stage('Clippy') {
             steps {
                 sh '''
@@ -340,7 +372,7 @@ pipeline {
                 conclusion: 'SUCCESS',
                 name: 'Rust CI',
                 summary: 'tiny-wb passed CI.',
-                text: 'RustSec audit, dependency policy, MSRV, formatting, compilation checks, tests, Clippy and the release build completed successfully. The release runtime smoke test is currently diagnostic only.',
+                text: 'RustSec audit, dependency policy, MSRV, formatting, compilation checks, tests, coverage, Clippy and the release build completed successfully. Badge generation and archival run in cleanup. The release runtime smoke test is currently diagnostic only.',
                 title: 'Build Successful'
             )
 
@@ -352,7 +384,7 @@ pipeline {
                 conclusion: 'FAILURE',
                 name: 'Rust CI',
                 summary: 'tiny-wb failed CI.',
-                text: 'RustSec audit, dependency policy, MSRV, formatting, compilation, tests, Clippy, or the release build failed. Check the Jenkins log.',
+                text: 'RustSec audit, dependency policy, MSRV, formatting, compilation, tests, coverage, Clippy, or the release build failed. Cleanup generates and archives current badges, including failure fallbacks. Check the Jenkins log.',
                 title: 'Build Failed'
             )
 
@@ -369,6 +401,20 @@ pipeline {
             )
 
             echo '⚠️ tiny-wb CI is unstable.'
+        }
+        cleanup {
+            sh 'scripts/finalize-badges.sh'
+            archiveArtifacts artifacts: 'coverage/version.svg,coverage/test.svg,coverage/coverage.svg',
+                fingerprint: true, allowEmptyArchive: false
+            script {
+                // BRANCH_NAME is supplied by Jenkins multibranch jobs.
+                // Fail closed for other job types; do not infer from detached HEAD.
+                if (!env.BRANCH_NAME) {
+                    echo 'Badge publication skipped: BRANCH_NAME unavailable; verify multibranch job configuration.'
+                } else if (env.BRANCH_NAME == env.BADGE_BRANCH && !env.CHANGE_ID && !env.TAG_NAME) {
+                    sh 'scripts/publish-badges.sh "$BADGE_ROOT" "$BADGE_OWNER" "$BADGE_PROJECT" "$BADGE_BRANCH" version test coverage'
+                }
+            }
         }
     }
 }
