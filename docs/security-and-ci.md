@@ -41,7 +41,9 @@ in this document and review the lockfile diff.
 Unused direct dependencies were removed while establishing the lock:
 `clap`, `once_cell`, `ratatui-splash-screen`, and `tui-textarea`. Removing them
 reduces download/build surface and makes policy results describe code that the
-application actually uses.
+application actually uses. The acquisition refactor also removed direct
+`packed_struct` and `memchr` dependencies: standard-library little-endian
+decoding and buffered framing now provide those functions.
 
 ## Pinned policy tools
 
@@ -119,6 +121,8 @@ cargo fmt --all -- --check
 cargo +1.88.0 check --locked --all-targets --all-features
 cargo check --locked --all-targets --all-features
 cargo test --locked --all-targets --all-features
+cargo test --locked --doc --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo build --locked --release --all-features
 ```
@@ -159,20 +163,19 @@ cargo coverage
 The exact alias is tracked in `.cargo/config.toml` and expands to:
 
 ```console
-cargo llvm-cov --locked --all-targets --all-features --json --summary-only --fail-under-lines 0 --output-path coverage/summary.json
+cargo llvm-cov --locked --all-targets --all-features --json --summary-only --fail-under-lines 85 --output-path coverage/summary.json
 ```
 
-The enforced line-coverage floor is **0%**: no Rust tests currently exist.
-Local measurement on 2026-10-04 was **0 of 1,024 lines (0%)**.
-This is an honest initial baseline, not evidence of application correctness.
-No ordinary production sources are excluded. Raise the floor as meaningful
-protocol and application tests are introduced. A passing test badge means the
-required test commands succeeded, even when the Rust harness contains zero tests.
+The enforced line-coverage floor is **85%**, measured across the library and
+application without excluding production sources. Local measurement on 2026-10-04 was **1,460 of 1,634 lines (89.35%)**,
+with 30 unit/integration tests and one separately run Rustdoc example. Tests
+cover configuration, protocol, transport, acquisition, export, UI and startup. The floor leaves some headroom for
+platform differences; it is not evidence of device/firmware correctness.
 
 `scripts/collect-coverage.sh` runs that command, validates the overall line
 percentage from temporary `coverage/summary.json`, renders the coverage badge,
 and deletes the summary, including on failure. Jenkins then creates the current
-build's test and coverage markers only after both required test runs succeed.
+build's test and coverage markers only after unit/integration tests, Rustdoc tests, and the coverage test run succeed.
 The release smoke test remains a nonfatal diagnostic.
 
 At checkout, CI recreates ignored `coverage/` to remove stale workspace state.

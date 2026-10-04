@@ -81,8 +81,8 @@ not recommended measurement levels. See the [safe-operation section](docs/tinysa
 
 ## Development
 
-The Jenkins pipeline checks formatting, compilation, tests, Clippy, and a
-release build. Run the equivalent local checks with:
+The Jenkins pipeline checks formatting, compilation, tests, documentation,
+coverage, Clippy, and a release build. Run the equivalent local checks with:
 
 ```console
 cargo fmt --all -- --check
@@ -91,6 +91,8 @@ cargo deny check
 cargo +1.88.0 check --locked --all-targets --all-features
 cargo check --locked --all-targets --all-features
 cargo test --locked --all-targets --all-features
+cargo test --locked --doc --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features
 cargo clippy --locked --all-targets --all-features -- -D warnings
 ```
 

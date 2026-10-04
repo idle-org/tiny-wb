@@ -255,6 +255,16 @@ pipeline {
             }
         }
 
+        stage('Documentation') {
+            steps {
+                sh '''
+                    set -eu
+                    cargo test --locked --doc --all-features
+                    RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features
+                '''
+            }
+        }
+
         stage('Coverage') {
             steps {
                 sh '''
@@ -372,7 +382,7 @@ pipeline {
                 conclusion: 'SUCCESS',
                 name: 'Rust CI',
                 summary: 'tiny-wb passed CI.',
-                text: 'RustSec audit, dependency policy, MSRV, formatting, compilation checks, tests, coverage, Clippy and the release build completed successfully. Badge generation and archival run in cleanup. The release runtime smoke test is currently diagnostic only.',
+                text: 'RustSec audit, dependency policy, MSRV, formatting, compilation checks, tests, documentation, coverage, Clippy and the release build completed successfully. Badge generation and archival run in cleanup. The release runtime smoke test is currently diagnostic only.',
                 title: 'Build Successful'
             )
 
@@ -384,7 +394,7 @@ pipeline {
                 conclusion: 'FAILURE',
                 name: 'Rust CI',
                 summary: 'tiny-wb failed CI.',
-                text: 'RustSec audit, dependency policy, MSRV, formatting, compilation, tests, coverage, Clippy, or the release build failed. Cleanup generates and archives current badges, including failure fallbacks. Check the Jenkins log.',
+                text: 'RustSec audit, dependency policy, MSRV, formatting, compilation, tests, documentation, coverage, Clippy, or the release build failed. Cleanup generates and archives current badges, including failure fallbacks. Check the Jenkins log.',
                 title: 'Build Failed'
             )
 
