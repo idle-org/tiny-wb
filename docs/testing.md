@@ -43,6 +43,9 @@ Hardware validation still requires a known model/version, safe RF input, and a
 bounded capture of the real command/response sequence. In particular, verify
 frequency-axis policy, the legacy preparatory scan, zero-offset acceptance and
 resume behavior against the connected firmware before changing their defaults.
+Use the guided [Basic and Ultra hardware checklist](hardware-validation.md) to
+produce CSV and identity evidence without connecting an RF source. Its Ultra
+case intentionally stays below 350 MHz and does not certify extended ranges.
 
 ## Library feature matrix and mock integration
 

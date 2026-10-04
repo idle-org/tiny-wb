@@ -24,6 +24,7 @@ before connecting an Ultra or Ultra+.
 - [Configuration](docs/configuration.md) — defaults, partial overrides, units, validation, and saved selections
 - [Release guide](docs/releases.md) — wrapper, target/artifact policy, token handling, and publication readiness
 - [Testing guide](docs/testing.md) — hardware-free regression tests and test boundaries
+- [Hardware validation](docs/hardware-validation.md) — guided Basic and Ultra acceptance checks
 - [Project architecture](docs/architecture.md) — components, state, data flow,
   files, dependencies, and extension points
 - [tinySA field guide](docs/tinysa-field-guide.md) — models, RF architecture,

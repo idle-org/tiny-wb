@@ -38,6 +38,11 @@ name = "mock-tinysa-server"
 path = "examples/mock-tinysa-server.rs"
 required-features = ["mock"]
 
+[[example]]
+name = "validate-hardware"
+path = "examples/validate-hardware.rs"
+required-features = ["serial"]
+
 [[test]]
 name = "mock_device"
 path = "tests/mock_device.rs"

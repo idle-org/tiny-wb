@@ -18,6 +18,8 @@ not need to reread the upstream wiki before changing the code.
    reproducible-build and supply-chain gates.
 6. [Upstream source catalogue](sources.md) records the primary references and
    their scope.
+7. [Hardware validation](hardware-validation.md) provides guided Basic and Ultra
+   checklists and the interactive validator command.
 
 ## Scope and authority
 

@@ -21,6 +21,7 @@ config.toml
 
 /coverage/
 /target-ci/
+/hardware-validation/
 
 # rust_realease artifacts and build cache
 /dist/
