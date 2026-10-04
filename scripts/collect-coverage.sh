@@ -5,7 +5,26 @@ summary=coverage/summary.json
 trap 'rm -f "$summary"' 0
 trap 'exit 1' HUP INT TERM
 # Alias and honest initial floor live in .cargo/config.toml.
-cargo coverage
-percentage=$(jq -er '.data | if length == 1 then .[0].totals.lines.percent else error("expected one overall total") end | select(type == "number" and . >= 0 and . <= 100)' "$summary")
+rm -f "$summary"
+coverage_status=0
+cargo coverage || coverage_status=$?
+# cargo-llvm-cov 0.6.16 can fail the floor silently after writing its report.
+# Print the measurement before cleanup, but never mask a failed Cargo run.
+if [ ! -s "$summary" ]; then
+    echo "ERROR: cargo coverage produced no summary (exit $coverage_status)." >&2
+    [ "$coverage_status" -ne 0 ] || coverage_status=1
+    exit "$coverage_status"
+fi
+if ! percentage=$(jq -er '.data | if type == "array" and length == 1 then .[0].totals.lines.percent else error("expected one overall total") end | select(type == "number" and . >= 0 and . <= 100)' "$summary"); then
+    echo "ERROR: cargo coverage produced an invalid line-coverage summary (exit $coverage_status)." >&2
+    [ "$coverage_status" -ne 0 ] || coverage_status=1
+    exit "$coverage_status"
+fi
+echo "Measured overall line coverage: $percentage% (required floor: see cargo coverage in .cargo/config.toml)."
+if [ "$coverage_status" -ne 0 ]; then
+    echo "ERROR: cargo coverage failed (exit $coverage_status); check the measurement against --fail-under-lines and the preceding compiler/test diagnostics." >&2
+    jq -r '.data[0].files // [] | sort_by(.summary.lines.percent)[] | "  \(.filename): \(.summary.lines.covered)/\(.summary.lines.count) lines (\(.summary.lines.percent)%)"' "$summary" >&2 || :
+    exit "$coverage_status"
+fi
 scripts/ci-coverage-badges.sh coverage --value "$percentage"
 rm -f "$summary"

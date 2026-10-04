@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Isolated renderer/publication contract checks; no public assets are touched."""
 import os
+import json
 from pathlib import Path
 import stat
 import shlex
@@ -17,6 +18,7 @@ PUBLISH = str(REPO / 'scripts/publish-badges.sh')
 def run(*args, ok=True):
     result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert (result.returncode == 0) == ok, (args, result.stderr.decode())
+    return result
 
 
 with tempfile.TemporaryDirectory() as directory:
@@ -156,6 +158,50 @@ with tempfile.TemporaryDirectory() as directory:
     assert not list(Path('coverage').glob('.*-123'))
     os.environ['PATH'] = old_path
     cargo.unlink()
+    # A coverage-floor failure can write a valid report and exit silently.
+    # Exercise the collector with real jq and rendering, but no Rust rebuild.
+    cargo.write_text('''#!/bin/sh
+[ "$*" = coverage ] || exit 99
+if [ -n "$FAKE_COVERAGE_REPORT" ]; then
+    printf '%s\\n' "$FAKE_COVERAGE_REPORT" > coverage/summary.json
+fi
+exit "$FAKE_COVERAGE_STATUS"
+''')
+    cargo.chmod(0o755)
+    os.environ['PATH'] = str(tools) + ':' + old_path
+    for percentage, status in ((90.87, 0), (85, 0), (84.99, 1), (90.87, 7)):
+        os.environ['FAKE_COVERAGE_REPORT'] = json.dumps({'data': [{
+            'totals': {'lines': {'percent': percentage}},
+            'files': [{'filename': 'src/example.rs', 'summary': {
+                'lines': {'percent': 80, 'count': 100, 'covered': 80}}}],
+        }]})
+        os.environ['FAKE_COVERAGE_STATUS'] = str(status)
+        before = Path('coverage/coverage.svg').read_bytes()
+        result = run(str(REPO/'scripts/collect-coverage.sh'), ok=status == 0)
+        assert result.returncode == status
+        assert f'{percentage}%' in result.stdout.decode()
+        if status:
+            assert '--fail-under-lines' in result.stderr.decode()
+            assert 'src/example.rs: 80/100 lines (80%)' in result.stderr.decode()
+            assert Path('coverage/coverage.svg').read_bytes() == before
+        else:
+            assert ET.parse('coverage/coverage.svg').getroot().attrib['aria-label'] == f'coverage: {percentage:.0f}%'
+        assert not Path('coverage/summary.json').exists()
+    for report in ('', '{broken', '{"data": []}', '{"data": [{}, {}]}',
+                   *[json.dumps({'data': [{'totals': {'lines': {'percent': p}}}]})
+                     for p in (None, '90', -1, 101)]):
+        for status in (0, 7):
+            # An old successful report must not hide a missing current report.
+            Path('coverage/summary.json').write_text('{"data":[{"totals":{"lines":{"percent":99}}}]}')
+            os.environ['FAKE_COVERAGE_REPORT'] = report
+            os.environ['FAKE_COVERAGE_STATUS'] = str(status)
+            result = run(str(REPO/'scripts/collect-coverage.sh'), ok=False)
+            assert result.returncode == (status or 1)
+            assert 'ERROR: cargo coverage produced' in result.stderr.decode()
+            assert not Path('coverage/summary.json').exists()
+    os.environ['PATH'] = old_path
+    del os.environ['FAKE_COVERAGE_REPORT'], os.environ['FAKE_COVERAGE_STATUS']
+    cargo.unlink()
     root.chmod(0o555)
     if os.geteuid() != 0:
         run(*args, 'test', ok=False)
@@ -171,4 +217,4 @@ for name in ('version', 'test', 'coverage'):
 pipeline = (REPO/'Jenkinsfile').read_text()
 assert "artifacts: 'coverage/version.svg,coverage/test.svg,coverage/coverage.svg'" in pipeline
 assert 'fingerprint: true, allowEmptyArchive: false' in pipeline
-print('Badge rendering, XML, validation, publication, README and archive checks passed.')
+print('Badge rendering, XML, validation, coverage diagnostics, publication, README and archive checks passed.')

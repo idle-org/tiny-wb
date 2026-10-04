@@ -183,6 +183,19 @@ and deletes the summary, including on failure. Jenkins then creates the current
 build's test and coverage markers only after unit/integration tests, Rustdoc tests, and the coverage test run succeed.
 The release smoke test remains a nonfatal diagnostic.
 
+The collector removes any stale summary before running Cargo and prints the
+measured percentage before deleting the current report. On a failed Cargo run,
+it also prints per-file line counts and percentages, ordered by coverage, and
+preserves Cargo's exit status. Missing or invalid summaries fail with an explicit
+diagnostic. A failed run never renders a successful coverage badge.
+
+The supplied FreeBSD Jenkins log for revision `e47feea` shows passing tests and
+a coverage report followed by exit 1, without a reported percentage.
+The pinned `cargo-llvm-cov` 0.6.16 can return that status silently when its line
+coverage floor is missed. The deleted report prevents confirming the measured
+value from that log; rerun CI with the collector diagnostics before changing
+tests or investigating platform instrumentation. The 85% floor remains enforced.
+
 At checkout, CI recreates ignored `coverage/` to remove stale workspace state.
 In `post { cleanup { ... } }`, it uses only current-build markers to choose test
 status and retain measured coverage, falling back to `failing` and neutral `-%`
