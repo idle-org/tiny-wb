@@ -121,6 +121,9 @@ cargo fmt --all -- --check
 cargo +1.88.0 check --locked --all-targets --all-features
 cargo check --locked --all-targets --all-features
 cargo test --locked --all-targets --all-features
+cargo test --locked --no-default-features --lib
+cargo check --locked --no-default-features --features serial --lib
+cargo test --locked --no-default-features --features mock --lib --test mock_device
 cargo test --locked --doc --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features
 cargo clippy --locked --all-targets --all-features -- -D warnings
@@ -167,9 +170,11 @@ cargo llvm-cov --locked --all-targets --all-features --json --summary-only --fai
 ```
 
 The enforced line-coverage floor is **85%**, measured across the library and
-application without excluding production sources. Local measurement on 2026-10-04 was **1,460 of 1,634 lines (89.35%)**,
-with 30 unit/integration tests and one separately run Rustdoc example. Tests
-cover configuration, protocol, transport, acquisition, export, UI and startup. The floor leaves some headroom for
+application without excluding production sources. Local measurement on 2026-10-04 was **1,852 of 2,038 lines (90.87%)**.
+The suite includes library, application, mock/loopback integration and startup
+tests, plus separately run Rustdoc examples. Tests
+cover configuration, protocol, transport, acquisition, export, UI, startup and
+mock device behavior. The floor leaves some headroom for
 platform differences; it is not evidence of device/firmware correctness.
 
 `scripts/collect-coverage.sh` runs that command, validates the overall line
@@ -210,3 +215,6 @@ was copied from `Dandaedre/agent-tasks` at revision
 `fb9d8f7d16f100c2d1377f23394a2302eac9ab18` (retrieved 2026-10-04), with local
 fixes for literal newlines in width measurement, oversized integer validation,
 unique temporary files, directory-output rejection and signal termination.
+
+The library feature matrix runs before coverage markers are issued. Mock tests
+require localhost listener permission and never connect to physical hardware.

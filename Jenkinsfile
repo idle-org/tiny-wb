@@ -255,6 +255,19 @@ pipeline {
             }
         }
 
+        stage('Library feature matrix') {
+            steps {
+                sh '''
+                    set -eu
+                    cargo test --locked --no-default-features --lib
+                    cargo check --locked --no-default-features --features serial --lib
+                    cargo test --locked --no-default-features --features mock --lib --test mock_device
+                    cargo build --locked --no-default-features --features mock --example mock-tinysa-server
+                    python3 scripts/test-mock-server.py "${CARGO_TARGET_DIR}/debug/examples/mock-tinysa-server"
+                '''
+            }
+        }
+
         stage('Documentation') {
             steps {
                 sh '''
