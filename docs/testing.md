@@ -16,6 +16,7 @@ cargo test --locked --doc
 | Protocol | Basic mode boundaries, point/repeat validation, truncated/extra records, alignment, closing brace, binary delimiter bytes, little-endian levels, offset and both frequency-axis conventions. |
 | Transport | One-byte/fragmented reads, multiple responses in one read, retained bytes after prompts, partial writes, invalid command lines, EOF, timeout, response size limits and raw-body framing. |
 | Acquisition | Exact command ordering, optional legacy pre-scan, progress completion, successful decoding, resume after malformed frames, and preservation of acquisition plus recovery errors. |
+| UI/startup | Missing/stale ports, numeric overflow and clamping, configured baud rates, navigation, one-time result transfer, every screen on small/headless terminals, and invalid config before terminal startup. |
 | Export | Header/units, deterministic CSV values, propagated write failures and collision-safe output files. |
 
 `Shell<T>` accepts `T: Read + Write`. To add a regression, provide a transcript

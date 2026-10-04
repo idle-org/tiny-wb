@@ -1,196 +1,143 @@
 # Project architecture
 
-## Purpose and boundary
-
-`tiny-wb` is a single-process desktop terminal application. Its job is narrow:
-collect an amplitude-versus-frequency sweep from a tinySA through the USB
-serial console, persist the sweep as CSV, and show the result in a terminal
-chart.
-
-It is not currently a general tinySA controller, live spectrum display,
-firmware updater, calibration utility, or Rust protocol library. It changes a
-small amount of temporary instrument state during acquisition and restores
-continuous sweeping with `resume`; it does not restore every preceding device
-setting.
-
-## Runtime data flow
-
-```text
-keyboard
-   |
-   v
-Ratatui event loop (AppInfo)
-   |  selected port, baud, MHz range, points, repeat
-   v
-ConnectionInfo (shared Arc<Mutex<...>> state)
-   |
-   +---- UI thread: render progress, device info, errors, chart
-   |
-   `---- scan worker thread
-           |
-           v
-      serialport / USB CDC
-           |
-           v
-        tinySA shell ---- text responses ending in "ch>"
-           |
-           `------------ scanraw binary frame
-                              |
-                              v
-                    parser -> Vec<(MHz, dBm)>
-                              |
-                              +-> timestamped CSV
-                              `-> final Ratatui chart
-```
-
-The UI remains responsive because scanning runs in a worker thread. Clones of
-`ConnectionInfo` share progress, status, returned data, messages, file name,
-and error state through `Arc<Mutex<_>>` values. The selected connection and
-scan parameters themselves are copied into the worker.
+`tiny-wb` has a reusable acquisition library and a thin terminal application.
+The core accepts typed values and I/O interfaces; it does not depend on UI
+widgets, port discovery, worker threads, or the application's working directory.
 
 ## Source map
 
 | File | Responsibility |
 | --- | --- |
-| `src/main.rs` | Start file logging and error reporting, initialize/restore the terminal, enumerate serial ports, and run the application. |
-| `src/ui.rs` | Construct defaults, drive the event/render loop, transition screens, spawn the scan worker, plot results, and map errors to user messages. |
-| `src/ui_struct.rs` | Define UI state, selectable fields, baud-rate and port lists, numeric bounds, colors, and navigation helpers. |
-| `src/structs.rs` | Define configuration persistence, shared connection state, status values, and application/protocol error types. |
-| `src/scan.rs` | Open the serial port, issue shell commands, find prompts, request `scanraw`, parse binary samples, convert levels, and write CSV. |
-| `build.rs` | Embed the Git short hash and, on Windows, compile the application icon resource. |
-| `Jenkinsfile` | Run formatting, checks, tests, Clippy, release build, and a non-fatal interactive-binary smoke diagnostic. |
+| `src/lib.rs` | Public core module boundary. |
+| `src/config.rs` | Typed settings, recursive partial overrides, legacy-key compatibility and validation. |
+| `config/default.toml` | Authoritative embedded defaults, with units and comments. |
+| `src/storage.rs` | Same-directory atomic replacement for saved configuration. |
+| `src/protocol.rs` | Basic input-path rules, scan request validation and pure raw-frame decoding. |
+| `src/transport.rs` | Buffered `Read + Write` shell I/O, complete command writes, text prompts and length-delimited raw frames. |
+| `src/acquisition.rs` | Command ordering, progress events, frame decoding and resume attempts. |
+| `src/export.rs` | CSV serialization to a writer and collision-safe file export. |
+| `src/main.rs` | Load configuration, start diagnostics, enumerate ports and manage terminal lifetime. |
+| `src/error.rs` | Application/UI boundary errors with original context. |
+| `src/scan.rs` | Open the serial port, adapt core events to shared progress, and export successful acquisitions. |
+| `src/ui/mod.rs` | Screen transitions, keyboard handling, worker startup and progress reconciliation. |
+| `src/ui/state.rs` | UI state, configured port/baud choices and bounded numeric input. |
+| `src/ui/view.rs` | Ratatui rendering and selection styling. |
+| `build.rs` | Embed Git revision and compile the Windows icon resource. |
+| `Jenkinsfile` | Required quality gates, coverage, badge cleanup/archival/publication and diagnostic smoke execution. |
+
+## Data flow
+
+```text
+embedded defaults + runtime overrides -> validated Config
+                                            |
+                             startup / terminal controller
+                                            |
+                       ScanRequest (Hz) + selected Config
+                                            |
+                                      serial worker
+                                            |
+                          Shell<SerialPort> -> acquisition
+                                            |
+                                decode_frame -> Vec<Sample>
+                                            |
+                           CSV export + completed UI snapshot
+```
+
+`ScanRequest` carries Hz, sample count and repeat count. `Sample` carries MHz
+and dBm. Units are converted at the UI/core boundary, not inside widgets or
+file naming. The selected zero offset is both sent to the instrument and used
+by the decoder. Frequency labeling is an explicit policy; inclusive labels
+remain the default for compatibility.
+
+The core reports `ScanEvent` values. `ScanState` adapts them to one
+`Arc<Mutex<Progress>>`; completion publishes samples, filename, status and 100%
+progress together only after export succeeds. The UI transfers the completed
+sample vector once, rather than cloning it every frame. Error reporting uses
+the original error's message instead of a second exhaustive mapping.
 
 ## UI state machine
 
-`AppState` advances in one direction during a normal run:
-
 ```text
-InitialConfig -> FinalConfig -> Finished -> EndWindow -> exit
-      |               |             |
-      `---------------+-------------+-> Error -> exit
+SelectingConnection -> SelectingScan -> Scanning -> Complete -> exit
+          |                  |             |
+          +------------------+-------------+-> Error -> exit
 ```
 
-- `InitialConfig` selects a serial port and baud rate.
-- `FinalConfig` selects start/stop MHz, sample count, and repeat count.
-- Enter from `FinalConfig` writes `config.toml`, fills `ConnectionInfo`, and
-  spawns the worker.
-- `Finished` is somewhat counter-intuitively the in-progress screen. It polls
-  shared status while the worker runs.
-- `EndWindow` plots the collected samples and reports success.
-- `Error` presents the mapped failure and exits on confirmation.
+The constructor takes configuration and enumerated ports as values, without
+reading files. Selection is clamped before rendering, including empty lists.
+Before a scan starts, the controller validates the complete selected settings
+and request, atomically saves settings, then starts a worker. The controller
+reconciles worker status before drawing; rendering does not consume samples.
 
-Defaults are 240–960 MHz, 10,001 points, one measurement per frequency, and
-115,200 baud. The UI permits 0–960 MHz in 10 MHz steps, 101–1,000,001 points in
-100-point steps, and repeat values from 1–1,000. A valid `config.toml` overrides
-the defaults. Frequencies are converted from UI MHz to protocol Hz only when
-`ConnectionInfo` is filled.
+The terminal guard restores terminal modes on ordinary returns and unwinding.
+Configuration, logging and enumeration errors occur before terminal takeover.
+Process termination or release-mode panic abort cannot be recovered by a guard.
 
-## Acquisition pipeline
+## Acquisition and protocol boundary
 
-`scan_with_progress` performs these operations:
+1. Validate the Basic range and sample/repeat limits before opening/using a port.
+2. Synchronize with stale input, allowing an idle timeout only during this step.
+3. Query `version`, `info` and the existing diagnostic commands.
+4. Set `repeat` and the configured raw zero offset, then query markers.
+5. Attempt `pause`, select input mode, and configure the display sweep.
+6. Optionally retain the historical `scan START STOP 290 101` preparation.
+7. Request `scanraw`, consume exactly the expected framed record count, then
+   consume the trailing shell prompt.
+8. Decode/validate all records and attempt `resume` on success or failure after
+   pause was attempted. Preserve both failures if resume also fails.
+9. Export validated samples and mark the application scan complete.
 
-1. Validate the requested range and choose Basic `low` or `high` input mode.
-2. Open the selected port with a 3 s read timeout.
-3. Drain stale input until the shell prompt is seen or reading times out.
-4. Query `version`, `info`, `leveloffset`, `vbat`, `usart_cfg`, and `threads`.
-5. Send `repeat N` and `zero 128`.
-6. Query markers, pause the normal sweep, and set the input mode.
-7. Set sweep start/stop, query the sweep, then run a 290-point textual `scan`.
-8. Send `scanraw START STOP POINTS` without immediately consuming a text reply.
-9. Read and parse its binary frame, update progress, and write CSV.
-10. Send `resume`, set progress to 100%, and expose the samples to the UI.
+The transport uses a persistent buffered stream. Prompt matching spans serial
+reads; bytes beyond a prompt remain available. Binary records are read by
+length, so sample bytes equal to braces or text characters are not delimiters.
+EOF, disconnect, oversized text and missing prompts are errors rather than
+successful partial reads. Writers use `write_all`, and protocol sequencing does
+not require `unsafe`.
 
-Step 7's textual `scan ... 290 101` does not contribute samples to the final
-CSV; its response is read and discarded. It therefore needs a documented
-reason or removal during a future protocol cleanup.
+See [USB protocol](usb-protocol.md) for firmware evidence and the unresolved
+frequency-label compatibility decision. Device facts are not inferred from
+our synthetic test transcripts.
 
-## Protocol boundary
+## Configuration and persistence
 
-Text commands are terminated with carriage return (`\r`). `send_cmd` sleeps,
-then reads until it finds the ASCII prompt `ch>`, and sleeps again. This is a
-timing-assisted, prompt-delimited request/response protocol. The application
-does not currently:
+The six legacy selection keys remain top-level. Additional sections cover
+serial timing/choices, scan policy, event timing, chart bounds, output and
+logging. Partial files merge with embedded defaults; unknown or invalid values
+fail explicitly. Saving selection values retains all recognized sections.
 
-- parse command echo separately from command output;
-- validate an explicit success status;
-- retain bytes after a prompt found in the middle of a serial read;
-- account for a prompt split across two read buffers;
-- preserve partial results after a read timeout;
-- negotiate capabilities from `version`, `info`, or `help`.
+CSV formatting is independent of file creation. The worker does not create a
+CSV until a complete frame has been validated and acquisition has returned
+success. Filenames contain microseconds plus a collision counter; exclusive
+creation avoids overwriting earlier scans. Failed writes remove incomplete
+files when the filesystem permits it. A file may be visible while being
+written; the returned path/completed status is the success indicator.
 
-The `scanraw` body is different: it is a binary `{...}` frame made of
-three-byte sample records. See [USB console and `scanraw` protocol](usb-protocol.md).
+See [configuration](configuration.md) for settings, paths and exact behavior.
 
-## Persistence and outputs
+## Extension points and remaining limits
 
-`config.toml` is stored in the process working directory and contains:
+- Add model/capability recognition ahead of request planning. The current
+  Basic mode rules must not be stretched to imply Ultra support.
+- Add new output formats beside `write_csv`, consuming `Sample` values rather
+  than parsing the wire format again.
+- Inject transcript streams into `Shell` and writers into export tests. Keep
+  UI tests on Ratatui's in-memory backend. See [testing](testing.md).
+- Settings change policy and timing; wire delimiters, fixed-point scaling and
+  command grammar remain protocol invariants.
+- Responses are still not parsed into explicit success/error acknowledgments;
+  an echo-only identity reply can appear nonempty. Prompt arrival is not proof
+  that a mutating command was accepted.
+- Serial timeouts are per-read idle timeouts, not a whole-transaction deadline.
+  Cancellation/abort and complete device-state restoration remain future work.
+  Quitting during a scan can terminate the worker before its resume attempt.
+- Synthetic tests do not establish the connected firmware's frequency stepping,
+  raw-offset acceptance, or need for the legacy preliminary scan. Defaults retain
+  previous behavior until hardware evidence supports changing it.
 
-```toml
-port = "/dev/ttyACM0"
-baudrate = 115200
-start_frequency = 240
-stop_frequency = 960
-points = 10001
-repeat = 1
-```
+## Dependency policy
 
-Each acquisition immediately creates a timestamped CSV in the working
-directory. It has no header. Column one is the application-computed frequency
-in MHz and column two is level in dBm. Logs are produced by `flexi_logger` in
-the working directory with its default file naming policy.
-
-## Important invariants and risks
-
-- A scan needs at least two points because host interpolation divides by
-  `points - 1`; the UI minimum of 101 enforces this, but the parser itself does
-  not.
-- `read_port_with_progress` estimates `3 * points + 6` bytes. Progress is only
-  an estimate because command echo and prompt bytes are also present.
-- The parser finds the first `{`, requires each subsequent full triple to start
-  with `x`, and stops on a triple whose first byte is `}`. End-frame validation
-  is currently commented out, so a truncated frame can be accepted.
-- The firmware emits sample bytes little-endian even though one wiki sentence
-  labels them “MSB LSB.” The upstream C implementation and the Rust parser both
-  use low byte followed by high byte.
-- Firmware computes `scanraw`'s step as `(stop - start) / points`, while the
-  host labels samples using `(stop - start) / (points - 1)`. The final host CSV
-  therefore labels its last point at `stop`, but current firmware measures its
-  last point one step below `stop`. This should be resolved in code, ideally by
-  testing against the target firmware version.
-- `zero 128` deliberately asks firmware to encode the level around a 128 dB
-  offset and the host subtracts 128. Without that command, the documented
-  default offset is 128 for Basic and 174 for Ultra.
-- Input-mode selection encodes Basic-only assumptions. Ultra has no `high`
-  input command, and the UI cannot request its ranges above 960 MHz.
-
-## Dependency roles
-
-- `ratatui` and `crossterm` (through Ratatui) provide terminal rendering and
-  input.
-- `serialport` enumerates and opens the device.
-- `packed_struct` decodes the three-byte sample representation.
-- `memchr` locates `{` and the `ch>` prompt.
-- `serde` and `toml` persist settings.
-- `chrono` names scan files.
-- `flexi_logger`, `log`, `color-eyre`, and `thiserror` cover diagnostics and
-  error propagation.
-- `strum` derives iteration/counting for menu enums.
-
-The manifest intentionally contains only dependencies used by the current
-binary. In particular, the parser uses `std::sync::OnceLock`; no external
-`once_cell` dependency is needed.
-
-## Recommended evolution path
-
-The cleanest route to reliable multi-model support is to separate four layers:
-
-1. a byte-accurate transport that preserves unread bytes and uses deadlines;
-2. a shell codec for echo, response, prompt, and binary frames;
-3. a capability/model layer derived from `version`/`info` plus explicit
-   firmware quirks;
-4. the TUI and CSV application built on a reusable acquisition API.
-
-Tests should cover prompt fragmentation, binary frames containing arbitrary
-byte values, truncation, Basic versus Ultra offsets/modes, frequency labeling,
-timeouts, and disconnects. Captured serial transcripts make good fixtures and
-do not require hardware in CI.
+The core uses standard-library byte decoding instead of `packed_struct`, and
+buffered framing instead of a separate direct `memchr` dependency. Transitive
+`memchr` use elsewhere in the graph is unrelated. Serde/TOML handle settings;
+serialport, Ratatui, chrono, log/flexi_logger, color-eyre and thiserror retain
+their device, presentation, timestamp and error-reporting roles.

@@ -1,35 +1,41 @@
-//! A (rather) simple crate to interface with a tinySA
-//!
-//! As of now this crate is not written as a lib/tui
-//! and will not offer any scripting capabilities
+//! Startup wiring for the interactive tinySA acquisition application.
 
 #![warn(missing_docs, clippy::missing_docs_in_private_items)]
+mod error;
 mod scan;
-mod structs;
 mod ui;
-mod ui_struct;
 
-use color_eyre::Result;
-use structs::TinyError;
-use ui_struct::AppInfo;
-
+use error::AppError;
 use flexi_logger::{FileSpec, Logger, WriteMode};
+use std::path::PathBuf;
+use tiny_wb::config::Config;
 
-fn main() -> Result<(), TinyError> {
-    let _logger = Logger::try_with_str("info, my::critical::module=trace")
-        .unwrap()
-        .log_to_file(FileSpec::default())
+/// Restore the terminal on ordinary errors and unwinding after initialization.
+struct TerminalSession;
+
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        ratatui::restore();
+    }
+}
+
+/// Load and validate settings before taking ownership of the user's terminal.
+fn main() -> Result<(), AppError> {
+    color_eyre::install()?;
+    let config_path = std::env::var_os("TINY_WB_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("config.toml"));
+    let config = Config::load(&config_path).map_err(|error| {
+        eprintln!("Cannot load {}: {error}", config_path.display());
+        error
+    })?;
+    let _logger = Logger::try_with_str(&config.logging.filter)?
+        .log_to_file(FileSpec::default().directory(&config.logging.directory))
         .write_mode(WriteMode::BufferAndFlush)
         .start()?;
-
-    log::info!(target:"info","Logging started");
-    color_eyre::install()?;
-    let terminal = ratatui::init();
-
     let ports = serialport::available_ports()?;
-    let app_r = AppInfo::new(ports).run(terminal);
-
-    ratatui::restore();
-
-    app_r.map_err(TinyError::TUIRuntimeError)
+    let _session = TerminalSession;
+    let terminal = ratatui::try_init()?;
+    ui::App::new(ports, config, config_path).run(terminal)?;
+    Ok(())
 }

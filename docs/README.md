@@ -42,3 +42,9 @@ cross-links. Adding mdBook configuration and a CI publication stage now would
 introduce a new build dependency without improving navigation. If the guide
 grows into many chapters, the files are already organized so that a future
 `SUMMARY.md` can include them with little restructuring.
+
+## Contributor references
+
+- [Configuration](configuration.md): embedded defaults, partial overrides and persistence.
+- [Testing](testing.md): regression seams and hardware verification boundaries.
+- [Agent/contributor guidance](../AGENTS.md): code structure, comments, documentation and atomic commits.

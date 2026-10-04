@@ -2,7 +2,7 @@
 
 This document is the implementation reference for talking to tinySA firmware.
 It combines the official USB-interface description with the behavior visible
-in the upstream C source and in `src/scan.rs`.
+in the upstream C source and in `src/protocol.rs`, `src/transport.rs`, and `src/acquisition.rs`.
 
 ## Transport
 
@@ -124,7 +124,8 @@ measurement accuracy.
 
 Upstream firmware calculates the transmitted integer from the measured value
 plus `config.ext_zero_level`; the `zero N` command changes that offset. tiny-wb
-sends `zero 128` before every acquisition and always uses:
+defaults to `zero 128` before every acquisition. `scan.zero_offset` supplies both
+the command and decoder offset; with the default it uses:
 
 ```text
 dBm = raw_u16 / 32 - 128
@@ -165,7 +166,7 @@ that vary with the firmware's `freq_t`, but the denominator is visibly
 `points`, not `points - 1` in the reviewed source. Therefore the last measured
 point is one nominal step below stop.
 
-tiny-wb currently labels output using:
+tiny-wb preserves historical output labels by default (`scan.frequency_axis = "inclusive"`):
 
 ```text
 host_step = (stop - start) / (points - 1)
@@ -174,8 +175,10 @@ frequency[i] = start + host_step * i
 
 This labels the endpoints inclusively and disagrees with the reviewed firmware.
 The discrepancy grows linearly through a sweep to almost one firmware step at
-the last point. Before changing it, capture a known narrow carrier with the
-target firmware and retain the `version` string; firmware behavior may change.
+the last point. `scan.frequency_axis = "firmware"` selects the reviewed firmware
+denominator instead. Before changing the setting, capture a known narrow carrier
+with the target firmware and retain the `version` string; firmware behavior may
+change. Both conventions have synthetic regression tests, not hardware proof.
 
 ## Prompt and synchronization behavior
 
@@ -224,15 +227,21 @@ resume
 ```
 
 Every item except `scanraw` goes through the text helper and waits for `ch>`.
-The `scanraw` reader also searches raw incoming chunks for `ch>` while the
-binary body is in flight. Because arbitrary sample bytes can coincidentally
-contain those three bytes, that is a correctness risk. The finder also cannot
-detect `ch>` split across two read calls. A framed binary state machine should
-replace this behavior.
+The transport retains unread bytes and recognizes prompts split across serial
+reads. It consumes the complete length-delimited raw frame before returning to
+text prompt parsing; arbitrary sample bytes cannot prematurely end the frame.
+The pure decoder requires the exact record count, alignment and closing brace.
 
-The `scan` outmask value `101` is outside the documented three-bit mask and its
-returned data is discarded. It should not be copied into new clients without
-first establishing why it is necessary.
+After attempting `pause`, acquisition attempts `resume` even if frame decoding
+or a later command fails. A failed recovery is included with the original error.
+There is no cancellation protocol or full state restoration, and process exit
+can prevent recovery. Device command acceptance is not explicitly acknowledged
+beyond a prompt.
+
+The `scan` outmask value `101` remains outside the documented three-bit mask and
+its returned data is discarded. The legacy preparation is enabled by default
+for compatibility, controlled by `scan.legacy_pre_scan`. Establish its hardware
+purpose before changing the default or copying it into another client.
 
 ## Manual diagnostic session
 
@@ -267,6 +276,6 @@ Use a byte-oriented program and a bounded point count instead.
 - Include model, firmware version, configured offset, start/stop, point count,
   repeat, RBW, attenuation, LNA, and Ultra state in future output metadata.
 
-See [Project architecture](architecture.md#important-invariants-and-risks) for
-repository-specific parser risks and [tiny-wb operations](tiny-wb-operations.md)
+See [Project architecture](architecture.md#extension-points-and-remaining-limits) for
+remaining implementation limits and [tiny-wb operations](tiny-wb-operations.md)
 for what users can safely expect today.

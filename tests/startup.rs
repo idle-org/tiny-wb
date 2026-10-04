@@ -1,0 +1,23 @@
+//! Verify configuration errors are reported before terminal/device initialization.
+
+use std::{fs, process::Command};
+
+#[test]
+fn invalid_override_exits_without_entering_the_terminal() {
+    let directory = std::env::temp_dir().join(format!("tiny-wb-startup-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("custom.toml");
+    fs::write(&path, "points = 1").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_tiny-wb"))
+        .current_dir(&directory)
+        .env("TINY_WB_CONFIG", &path)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    let error = String::from_utf8_lossy(&result.stderr);
+    assert!(error.contains("custom.toml"));
+    assert!(error.contains("points must be within"));
+    assert!(!result.stdout.windows(2).any(|bytes| bytes == b"\x1b["));
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+    fs::remove_dir_all(directory).unwrap();
+}

@@ -9,11 +9,7 @@ license = "MIT"
 chrono = "0.4.38"
 color-eyre = "0.6.3"
 flexi_logger = "0.29.0"
-# human-panic = "2.0.1"
-log = { version = "0.4.22", features = ["release_max_level_error"] }
-# log = { version = "0.4.22"}
-memchr = "2.7.4"
-packed_struct = "0.10.1"
+log = "0.4.22"
 ratatui = "=0.30.2"
 serde = { version = "1.0.210", features = ["derive"] }
 serialport = "4.5.0"

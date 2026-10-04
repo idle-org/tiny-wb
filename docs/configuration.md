@@ -5,6 +5,17 @@ in the binary at compile time. To customize them, copy it to `config.toml` in
 the working directory, or supply a partial file containing only overrides.
 Rebuild after changing the embedded file; it is not read at runtime.
 
+At startup the application reads `config.toml`, or the path named by the
+`TINY_WB_CONFIG` environment variable. For example:
+
+```console
+TINY_WB_CONFIG=/path/to/session.toml cargo run --release
+```
+
+Settings and logging are validated before entering the terminal interface.
+Saving a scan selection writes to this same path; unrelated configuration
+sections are retained. An invalid file is reported rather than silently reset.
+
 The configuration API is in `src/config.rs`. It recursively merges supplied
 TOML tables with the embedded defaults, deserializes into typed settings, and
 validates before use. Arrays replace their defaults. Unknown keys, invalid

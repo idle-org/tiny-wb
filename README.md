@@ -17,6 +17,8 @@ before connecting an Ultra or Ultra+.
 ## Documentation
 
 - [Documentation index](docs/README.md) — where to start and source policy
+- [Configuration](docs/configuration.md) — defaults, partial overrides, units, validation, and saved selections
+- [Testing guide](docs/testing.md) — hardware-free regression tests and test boundaries
 - [Project architecture](docs/architecture.md) — components, state, data flow,
   files, dependencies, and extension points
 - [tinySA field guide](docs/tinysa-field-guide.md) — models, RF architecture,
@@ -49,8 +51,10 @@ as a COM port. The user running `tiny-wb` must have permission to open it.
 The interface uses arrow keys or Vim-style `h`, `j`, `k`, `l`. Left/right
 selects a field, up/down changes its value, Enter advances, and `q` or Escape
 quits. Scan frequencies shown in the UI are MHz. The selected settings are
-stored in `config.toml`; scan results are written in the current directory as
-`scan_YYYYMMDD HH_MM_SS.csv`.
+stored in `config.toml` (or `TINY_WB_CONFIG`); scan results default to the current
+directory with collision-safe timestamped names. Timing, scan defaults, chart
+bounds, CSV output, and logging are configurable. See the commented
+[defaults](config/default.toml) and [configuration guide](docs/configuration.md).
 
 ## Current scan flow
 
@@ -90,9 +94,10 @@ cargo test --locked --all-targets --all-features
 cargo clippy --locked --all-targets --all-features -- -D warnings
 ```
 
-The application is currently a binary crate rather than a reusable library.
-Protocol work is concentrated in `src/scan.rs`; UI state and rendering are in
-`src/ui.rs`, `src/ui_struct.rs`, and `src/structs.rs`.
+The binary builds on a reusable library for configuration, protocol decoding,
+transport, acquisition, and CSV export. UI control flow, state, and rendering
+live in `src/ui/`. See [architecture](docs/architecture.md) for the source map
+and [AGENTS.md](AGENTS.md) for code, documentation, and commit conventions.
 
 ## License
 

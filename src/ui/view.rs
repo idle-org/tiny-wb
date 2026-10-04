@@ -1,0 +1,386 @@
+//! Ratatui rendering; acquisition results arrive through shared scan state.
+
+use super::state::{
+    App, AppState, SelectedConnection, SelectedScan, SELECTED_COLOR, UNSELECTED_COLOR,
+};
+use crate::error::UiError;
+use ratatui::{
+    layout::{Constraint, Layout, Rect},
+    style::{Color, Style},
+    symbols::Marker,
+    widgets::{Axis, Block, Chart, Dataset, GraphType, List, Paragraph, Wrap},
+    Frame,
+};
+
+impl App {
+    /// Render the active screen; lifecycle transitions happen in the controller.
+    pub(super) fn draw(&mut self, frame: &mut Frame<'_>) -> Result<(), UiError> {
+        match self.flow_state {
+            AppState::SelectingConnection(_) => self.draw_config(frame),
+            AppState::SelectingScan(_) => self.draw_final_config(frame),
+            AppState::Scanning => self.draw_progress(frame),
+            AppState::Complete => self.draw_end_window(frame),
+            AppState::Error => self.draw_error(frame),
+        }
+    }
+
+    /// Render scan settings with the focused field highlighted.
+    fn draw_final_config(&mut self, frame: &mut Frame<'_>) -> Result<(), UiError> {
+        let [_, spaced, _] = Layout::horizontal([
+            Constraint::Min(7),
+            Constraint::Percentage(100),
+            Constraint::Min(7),
+        ])
+        .areas(frame.area());
+        let [_, title_area, _, main_area, _, status_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .areas(spaced);
+        let [area_minf, area_maxf, area_points, repeat] = Layout::horizontal([
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+        ])
+        .areas(main_area);
+        let (mif_color, maf_color, poi_color, rpt_color) = match self.flow_state {
+            AppState::SelectingScan(SelectedScan::StartFreq) => (
+                SELECTED_COLOR,
+                UNSELECTED_COLOR,
+                UNSELECTED_COLOR,
+                UNSELECTED_COLOR,
+            ),
+            AppState::SelectingScan(SelectedScan::FinalFreq) => (
+                UNSELECTED_COLOR,
+                SELECTED_COLOR,
+                UNSELECTED_COLOR,
+                UNSELECTED_COLOR,
+            ),
+            AppState::SelectingScan(SelectedScan::Points) => (
+                UNSELECTED_COLOR,
+                UNSELECTED_COLOR,
+                SELECTED_COLOR,
+                UNSELECTED_COLOR,
+            ),
+            AppState::SelectingScan(SelectedScan::Repeat) => (
+                UNSELECTED_COLOR,
+                UNSELECTED_COLOR,
+                UNSELECTED_COLOR,
+                SELECTED_COLOR,
+            ),
+            _ => unreachable!(),
+        };
+
+        frame.render_widget(
+            Paragraph::new(self.start_frequency.to_string())
+                .block(Block::bordered().title("Start Frequency"))
+                .style(mif_color),
+            area_minf,
+        );
+        frame.render_widget(
+            Paragraph::new(self.stop_frequency.to_string())
+                .block(Block::bordered().title("Stop Frequency"))
+                .style(maf_color),
+            area_maxf,
+        );
+        frame.render_widget(
+            Paragraph::new(self.points.to_string())
+                .block(Block::bordered().title("Points"))
+                .style(poi_color),
+            area_points,
+        );
+        frame.render_widget(
+            Paragraph::new(self.repeat.to_string())
+                .block(Block::bordered().title("Repeat"))
+                .style(rpt_color),
+            repeat,
+        );
+
+        self.update_color()?;
+        frame.render_widget(
+            Paragraph::new(self.status_message.clone())
+                .wrap(Wrap { trim: true })
+                .block(Block::bordered()),
+            title_area,
+        );
+        self.render_footer(frame, status_area);
+        Ok(())
+    }
+    /// Show keyboard guidance below editable settings.
+    fn render_footer(&self, frame: &mut Frame, area: Rect) {
+        frame.render_widget(
+            Paragraph::new(
+                "Use ↓↑ to move, ←→ to change status widget and ↲ to validate configuration.",
+            )
+            .centered(),
+            area,
+        );
+    }
+
+    /// Render the available ports and configured baud choices.
+    fn draw_config(&mut self, frame: &mut Frame) -> Result<(), UiError> {
+        let [_, spaced, _] = Layout::horizontal([
+            Constraint::Min(7),
+            Constraint::Percentage(100),
+            Constraint::Min(7),
+        ])
+        .areas(frame.area());
+        let [_, title_area, _, main_area, status_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Min(10),
+            Constraint::Length(1),
+        ])
+        .areas(spaced);
+        let [area_ports, area_baud] =
+            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .areas(main_area);
+        let list_ports = self
+            .menu_items
+            .portlist
+            .as_ref()
+            .ok_or(UiError::UninitializedItemList("Port", line!(), file!()))?;
+        let list_baudrates = self
+            .menu_items
+            .baudlist
+            .as_ref()
+            .ok_or(UiError::UninitializedItemList("Baud", line!(), file!()))?;
+        frame.render_stateful_widget(list_ports, area_ports, &mut self.port_list.state);
+        frame.render_stateful_widget(list_baudrates, area_baud, &mut self.baudrate.state);
+        frame.render_widget(
+            Paragraph::new(self.status_message.clone())
+                .wrap(Wrap { trim: true })
+                .block(Block::bordered()),
+            title_area,
+        );
+        self.render_footer(frame, status_area);
+        Ok(())
+    }
+
+    /// Render a snapshot of worker progress without consuming completed samples.
+    fn draw_progress(&mut self, frame: &mut Frame<'_>) -> Result<(), UiError> {
+        let [_, main_s, _] = Layout::horizontal([
+            Constraint::Min(7),
+            Constraint::Percentage(90),
+            Constraint::Min(7),
+        ])
+        .areas(frame.area());
+        let [title_area, progress_area, main_area, _, _] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Min(10),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .areas(main_s);
+        let (pb, status, message) = {
+            let status = self.scan_state.message();
+            let status = Paragraph::new(status.clone())
+                .block(Block::bordered().title("Operation"))
+                .style(SELECTED_COLOR);
+            let message = self.scan_state.info();
+            let message = Paragraph::new(message.clone())
+                .wrap(Wrap { trim: true })
+                .block(Block::bordered().title("TinySA Info"))
+                .style(SELECTED_COLOR);
+            let pb = self
+                .menu_items
+                .progress_bar
+                .take()
+                .ok_or(UiError::UninitializedItemList(
+                    "ProgressBar",
+                    line!(),
+                    file!(),
+                ))?
+                .ratio(self.scan_state.progress() as f64 / 100.);
+            (pb, status, message)
+        };
+        frame.render_widget(pb.clone(), progress_area);
+        frame.render_widget(status, title_area);
+        frame.render_widget(message, main_area);
+        self.menu_items.progress_bar = Some(pb);
+        Ok(())
+    }
+
+    /// Render the original failure context and the last worker operation.
+    fn draw_error(&mut self, frame: &mut Frame) -> Result<(), UiError> {
+        let [_, main_s, _] = Layout::horizontal([
+            Constraint::Min(7),
+            Constraint::Percentage(90),
+            Constraint::Min(7),
+        ])
+        .areas(frame.area());
+        let [_, title_area, _main_area, message_area, _, footer_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Min(10),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .areas(main_s);
+
+        let conn_status = self.scan_state.status();
+        let status_message = self.error_message_from_current_error();
+        let status = Paragraph::new(status_message)
+            .wrap(Wrap { trim: true })
+            .block(Block::bordered().title("Status"))
+            .style(Color::Red);
+        let additional = self.scan_state.error().unwrap_or_default();
+        let error = Paragraph::new(format!(
+            "Last status: {:?}\nLast message: {}\n{}",
+            conn_status,
+            self.scan_state.message(),
+            additional
+        ))
+        .wrap(Wrap { trim: true })
+        .block(Block::bordered().title("Status"));
+        let footer = Paragraph::new("Press ↲ or q to exit".to_string()).centered();
+        frame.render_widget(status, title_area);
+        frame.render_widget(error, message_area);
+        frame.render_widget(footer, footer_area);
+        Ok(())
+    }
+
+    /// Display the original error context rather than maintaining a second mapping.
+    fn error_message_from_current_error(&self) -> String {
+        self.scan_state
+            .error()
+            .unwrap_or_else(|| "An unspecified error occurred".into())
+    }
+
+    /// Plot completed samples using the configured level bounds.
+    fn draw_end_window(&mut self, frame: &mut Frame) -> Result<(), UiError> {
+        let [_, main_s, _] = Layout::horizontal([
+            Constraint::Min(7),
+            Constraint::Percentage(90),
+            Constraint::Min(7),
+        ])
+        .areas(frame.area());
+        let [title_area, _main_area, graph_area, _, footer_area] = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Min(10),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .areas(main_s);
+
+        let status = Paragraph::new(format!(
+            "The scan of {} points in the range ({}MHz - {}MHz) finished successfully",
+            self.points.value(),
+            self.start_frequency.value(),
+            self.stop_frequency.value(),
+        ))
+        .block(Block::bordered().title("Status"))
+        .style(SELECTED_COLOR);
+
+        let datasets = vec![Dataset::default()
+            .marker(Marker::Dot)
+            .graph_type(GraphType::Scatter)
+            .style(Style::new().yellow())
+            .data(&self.return_data)];
+
+        let chart = Chart::new(datasets)
+            .x_axis(
+                Axis::default()
+                    .bounds([
+                        self.start_frequency.value() as f64,
+                        self.stop_frequency.value() as f64,
+                    ])
+                    .style(Style::default().fg(Color::Gray))
+                    .labels([
+                        format!("{}MHz", self.start_frequency),
+                        format!(
+                            "{}MHz",
+                            self.start_frequency.value()
+                                + (self
+                                    .stop_frequency
+                                    .value()
+                                    .saturating_sub(self.start_frequency.value()))
+                                    / 2
+                        ),
+                        format!("{}MHz", self.stop_frequency),
+                    ]),
+            )
+            .y_axis(
+                Axis::default()
+                    .bounds([self.config.ui.chart_min_dbm, self.config.ui.chart_max_dbm])
+                    .style(Style::default().fg(Color::Gray))
+                    .labels([
+                        format!("{} dBm", self.config.ui.chart_min_dbm),
+                        format!(
+                            "{} dBm",
+                            (self.config.ui.chart_min_dbm + self.config.ui.chart_max_dbm) / 2.0
+                        ),
+                        format!("{} dBm", self.config.ui.chart_max_dbm),
+                    ]),
+            );
+        frame.render_widget(chart, graph_area);
+        let footer = Paragraph::new(format!(
+            "{}, press ↲ or q to exit",
+            self.scan_state.message(),
+        ))
+        .centered();
+        frame.render_widget(status, title_area);
+        frame.render_widget(footer, footer_area);
+        Ok(())
+    }
+}
+
+impl App {
+    /// Apply the active/inactive style to a cached list widget.
+    pub(crate) fn change_color(
+        &mut self,
+        name: &'static str,
+        list: List<'static>,
+        color: Color,
+    ) -> Option<List<'static>> {
+        Some(
+            list.block(Block::bordered().title(name).border_style(color))
+                .style(Style::default().fg(color)),
+        )
+    }
+}
+impl App {
+    /// Update connection selection styling after navigation.
+    pub(crate) fn update_color(&mut self) -> Result<(), UiError> {
+        match self.flow_state {
+            AppState::SelectingConnection(ref c) => {
+                let (p_c, b_c) = match c {
+                    SelectedConnection::Baudrate => (UNSELECTED_COLOR, SELECTED_COLOR),
+                    SelectedConnection::Port => (SELECTED_COLOR, UNSELECTED_COLOR),
+                };
+                let (p, b) = (
+                    self.menu_items
+                        .portlist
+                        .take()
+                        .ok_or(UiError::UninitializedItemList(
+                            "Port List",
+                            line!(),
+                            file!(),
+                        ))?,
+                    self.menu_items
+                        .baudlist
+                        .take()
+                        .ok_or(UiError::UninitializedItemList(
+                            "Port List",
+                            line!(),
+                            file!(),
+                        ))?,
+                );
+                self.menu_items.portlist = self.change_color("COM Ports", p, p_c);
+                self.menu_items.baudlist = self.change_color("Baudrate", b, b_c);
+            }
+            AppState::SelectingScan(_selected_final_config) => (),
+            _ => (),
+        }
+        Ok(())
+    }
+}

@@ -47,8 +47,8 @@ cargo build --release
 ```
 
 The program does not currently expose meaningful command-line options; it
-starts the interactive terminal immediately. Run it from the directory where
-you want `config.toml`, logs, and scan CSV files to appear.
+starts the interactive terminal immediately. Run it from the working directory for your settings and output, or set
+`TINY_WB_CONFIG` to another configuration path. See [configuration](configuration.md).
 
 ### Serial permissions
 
@@ -73,15 +73,17 @@ normally own the port.
 The application enumerates ports at startup. Selection priority is:
 
 1. the port saved in `config.toml`, if present;
-2. common candidates (`/dev/ttyACM0`, `COM3`, `COM5`, `/dev/ttyS16`);
+2. the configured `serial.preferred_ports` (by default `/dev/ttyACM0`, `COM3`, `COM5`, `/dev/ttyS16`);
 3. the first enumerated port.
 
-Baud choices range from 19,200 to 3,000,000; default is 115,200 unless a saved
-value matches the built-in list.
+Default baud choices range from 19,200 to 3,000,000, with 115,200 selected.
+`serial.baudrates` defines the choices; the selected rate must belong to that
+list. No available ports produces an actionable error rather than an index panic.
 
 ### Scan screen
 
-Fields and bounds are:
+The embedded defaults are shown below. Steps and sample/repeat bounds are
+configurable; Basic frequency limits remain fixed protocol rules.
 
 | Field | Unit | Default | Step | Bounds |
 | --- | --- | ---: | ---: | ---: |
@@ -101,8 +103,9 @@ received, not a predictive time estimate.
 
 The scan runs on a worker thread while the UI displays shared progress and the
 concatenated `version`/`info` response. On success, the final screen plots a
-scatter trace. Its Y axis is fixed to −128–0 dBm, so valid results outside that
-range are clipped visually even though CSV data may contain them.
+scatter trace. Its Y axis defaults to −128–0 dBm and uses the configured `ui.chart_min_dbm`
+and `ui.chart_max_dbm` bounds. Values outside those bounds are clipped visually
+even though CSV data may contain them.
 
 ## Files
 
@@ -119,40 +122,47 @@ points = 10001
 repeat = 1
 ```
 
-Frequencies in this file are MHz, unlike protocol frequencies (Hz). The file
-is overwritten by the next run. A missing or invalid configuration falls back
-to defaults; validate unexpected values before assuming they were loaded.
+Frequencies in this file are MHz, unlike protocol frequencies (Hz). Saving a selection atomically replaces this file while preserving every
+recognized settings section. Missing files use embedded defaults; malformed,
+unknown or invalid settings are reported before terminal startup. Override the
+path with `TINY_WB_CONFIG`. See [configuration](configuration.md) for the schema.
 
 ### CSV
 
-The scanner writes `scan_YYYYMMDD HH_MM_SS.csv` in the working directory. It
-has no header:
+By default the scanner writes `scan_YYYYMMDD HH_MM_SS_microseconds_counter.csv`
+in the working directory. The directory and filename prefix are configurable;
+exclusive creation prevents overwriting earlier scans. The default has no header:
 
 ```csv
 240,-92.4375
 240.072,-91.96875
 ```
 
-Column one is MHz and column two is dBm. The file is created before full frame
-validation, so an error can leave a partial or empty CSV. Also note the
-[known frequency-label mismatch](usb-protocol.md#frequency-assignment).
+Column one is MHz and column two is dBm. The file is created only after complete frame validation and a successful
+resume response. Failed writes are reported and incomplete files are removed
+when possible. Enable `output.include_header` for named columns. Choose the
+frequency-label convention explicitly after reviewing the
+[frequency assignment notes](usb-protocol.md#frequency-assignment).
 
 ### Logs
 
-`flexi_logger` writes diagnostic logs to a file in the working directory. Logs
+`flexi_logger` uses `logging.filter` and `logging.directory`; defaults are
+`info` and the working directory. The filter also applies in release builds. Logs
 can contain instrument version/configuration details and port names. Attach the
 relevant bounded excerpt—not an uncontrolled archive—when reporting a bug.
 
 ## Instrument state changed by a run
 
 tiny-wb changes repeat count, raw zero offset, input mode, display sweep start
-and stop, and pause/resume state. It also runs an auxiliary textual scan before
-the raw scan. It does not snapshot and restore previous values. If preserving a
+and stop, and pause/resume state. By default it also runs the legacy auxiliary textual scan before
+the raw scan; `scan.legacy_pre_scan` can disable it after hardware validation. It does not snapshot and restore previous values. If preserving a
 carefully tuned front-panel configuration matters, save it as an instrument
 preset and reload it after tiny-wb exits.
 
-If acquisition fails after `pause`, error handling does not guarantee a final
-`resume`; the front panel may remain paused. Send `resume`, use the UI, or
+After attempting `pause`, acquisition always attempts `resume`, including on
+frame or I/O errors. This is best-effort recovery, not confirmation that a
+disconnected device resumed or that its previous settings were restored. Quitting
+during acquisition can still terminate the worker before recovery. Send `resume`, use the UI, or
 power-cycle/reload a preset after making the RF setup safe.
 
 ## Troubleshooting
@@ -177,7 +187,8 @@ power-cycle/reload a preset after making the RF setup safe.
 - Wake/power the instrument and close auto-refreshing software.
 - Manually send `version` in a serial terminal and confirm a `ch>` prompt.
 - Record firmware version. The client relies on prompt timing and may fail on a
-  slow command or fragmented prompt even when the instrument is healthy.
+  slow command when the configured read timeout is too short. Fragmented prompts
+are handled by the buffered transport.
 
 ### Parse beginning/end/alignment error
 
@@ -185,15 +196,15 @@ power-cycle/reload a preset after making the RF setup safe.
 - Disable any other process reading the port.
 - Ensure the firmware implements the documented `scanraw` framing.
 - Preserve a raw byte capture if possible. Do not convert it through UTF-8.
-- Be aware that the current reader can mistake binary bytes equal to `ch>` for
-  the shell prompt or miss a prompt split between OS reads.
+- The decoder now rejects truncated, extra, misaligned and unterminated records.
+  Preserve the exact requested point count and firmware version with the capture.
 
 ### Trace is shifted in frequency
 
-The current host labels `points` samples over `points - 1` intervals, while the
-reviewed firmware measures using a `span / points` step. Verify with a known
-carrier, record firmware version, and use the firmware formula when correcting
-the exported axis offline.
+The default `inclusive` labeling uses `points - 1` intervals, while the reviewed
+firmware uses a `span / points` step. Verify with a known carrier and record the
+firmware version before choosing `scan.frequency_axis = "firmware"`. This setting
+changes CSV/chart labels; it does not change the instrument request.
 
 ### Levels are wrong by about 46 dB
 
@@ -226,18 +237,11 @@ Include:
 Never include a dangerous live-transmitter reproduction just to demonstrate a
 software bug; substitute a low-level known source or recorded serial fixture.
 
-## Current engineering backlog implied by the documentation
+## Remaining engineering work
 
-These are documentation-derived gaps, not changes made in this task:
-
-1. Parse `version`/`info` into a model and capability structure.
-2. Add Ultra/Ultra+ ranges and correct mode syntax, or explicitly reject them.
-3. Replace prompt searches with a persistent mixed text/binary framing state
-   machine.
-4. Resolve the `scanraw` frequency denominator against real firmware fixtures.
-5. Remove or justify the preliminary `scan ... 290 101` request.
-6. Validate exact record count and closing delimiter before accepting/writing a
-   completed CSV.
-7. Restore changed instrument state on success, cancellation, and error.
-8. Put model/firmware/settings and column names in output metadata.
-9. Add protocol tests based on captured Basic and Ultra transcripts.
+Model/capability detection, Ultra-specific command/range support, overall
+transaction deadlines, cancellation/abort, full instrument-state restoration,
+and richer output metadata remain open. Buffered framing, strict record-count
+validation, reusable core interfaces and hardware-free regression tests are
+implemented. Real Basic/Ultra transcript fixtures and hardware checks are still
+needed; see [architecture](architecture.md#extension-points-and-remaining-limits).
