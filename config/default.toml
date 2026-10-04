@@ -1,0 +1,45 @@
+# Embedded defaults. Copy to config.toml to customize; partial overrides work.
+# Frequencies here and in CSV are MHz; commands sent to tinySA use Hz.
+port = ""
+baudrate = 115200
+start_frequency = 240
+stop_frequency = 960
+points = 10001
+repeat = 1
+
+[serial]
+# Timeout for each blocking serial read, not a whole-scan deadline.
+timeout_ms = 3000
+command_delay_ms = 20
+settle_delay_ms = 200
+scan_delay_ms = 2000
+max_response_bytes = 65536
+baudrates = [19200, 38400, 57600, 115200, 230400, 460800, 921600, 1843200, 2000000, 3000000]
+preferred_ports = ["/dev/ttyACM0", "COM3", "COM5", "/dev/ttyS16"]
+
+[scan]
+# Sent with `zero`; the decoder uses this same offset.
+zero_offset = 128
+frequency_step_mhz = 10
+points_step = 100
+min_points = 101
+max_points = 1000001
+max_repeat = 1000
+# Retain historical endpoint labels. `firmware` uses span / points instead.
+frequency_axis = "inclusive"
+# Retain the historical preparatory text scan until hardware confirms removal.
+legacy_pre_scan = true
+
+[ui]
+poll_interval_ms = 16
+chart_min_dbm = -128.0
+chart_max_dbm = 0.0
+
+[output]
+directory = "."
+filename_prefix = "scan"
+include_header = false
+
+[logging]
+filter = "info"
+directory = "."
