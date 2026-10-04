@@ -166,7 +166,7 @@ cargo coverage
 The exact alias is tracked in `.cargo/config.toml` and expands to:
 
 ```console
-cargo llvm-cov --locked --all-targets --all-features --json --summary-only --fail-under-lines 85 --output-path coverage/summary.json
+cargo llvm-cov --locked --all-targets --all-features --ignore-filename-regex /registry/src/ --json --summary-only --fail-under-lines 85 --output-path coverage/summary.json
 ```
 
 The enforced line-coverage floor is **85%**, measured across the library and
@@ -183,18 +183,23 @@ and deletes the summary, including on failure. Jenkins then creates the current
 build's test and coverage markers only after unit/integration tests, Rustdoc tests, and the coverage test run succeed.
 The release smoke test remains a nonfatal diagnostic.
 
-The collector removes any stale summary before running Cargo and prints the
-measured percentage before deleting the current report. On a failed Cargo run,
-it also prints per-file line counts and percentages, ordered by coverage, and
-preserves Cargo's exit status. Missing or invalid summaries fail with an explicit
-diagnostic. A failed run never renders a successful coverage badge.
+The collector removes any stale summary before running Cargo and displays only
+`Final line coverage: 90.87%` on success. Compiler and test output is saved to
+ignored `coverage/coverage.log` in the workspace; failures print a short error
+pointing to that log and preserve Cargo's exit status. Missing or invalid
+summaries fail explicitly. No per-file coverage listing is printed, and failed
+runs never render a successful coverage badge.
 
-The supplied FreeBSD Jenkins log for revision `e47feea` shows passing tests and
-a coverage report followed by exit 1, without a reported percentage.
-The pinned `cargo-llvm-cov` 0.6.16 can return that status silently when its line
-coverage floor is missed. The deleted report prevents confirming the measured
-value from that log; rerun CI with the collector diagnostics before changing
-tests or investigating platform instrumentation. The 85% floor remains enforced.
+The FreeBSD Jenkins report supplied on 2026-10-05 included 932 crates.io
+source files alongside tiny-wb's 14 source files: 12,243/144,250 covered lines
+(**8.49%**) overall, versus 1,852/2,038 (**90.87%**) for tiny-wb alone.
+Dependency sources under `/root/.cargo/registry/src/` escaped the pinned tool's
+default Cargo-home-based filter. The log does not establish why that default
+filter missed these paths. The alias explicitly filters
+`/registry/src/` paths so dependency caches are excluded regardless of their
+home directory. All tiny-wb production sources and the **85%** floor remain
+unchanged. This corrects report scope, not test coverage. A real FreeBSD Jenkins
+rerun remains necessary to verify the corrected report on that worker.
 
 At checkout, CI recreates ignored `coverage/` to remove stale workspace state.
 In `post { cleanup { ... } }`, it uses only current-build markers to choose test

@@ -2,28 +2,28 @@
 set -eu
 mkdir -p coverage
 summary=coverage/summary.json
+log=coverage/coverage.log
 trap 'rm -f "$summary"' 0
 trap 'exit 1' HUP INT TERM
 # Alias and honest initial floor live in .cargo/config.toml.
 rm -f "$summary"
 coverage_status=0
-cargo coverage || coverage_status=$?
+cargo coverage >"$log" 2>&1 || coverage_status=$?
 # cargo-llvm-cov 0.6.16 can fail the floor silently after writing its report.
 # Print the measurement before cleanup, but never mask a failed Cargo run.
 if [ ! -s "$summary" ]; then
-    echo "ERROR: cargo coverage produced no summary (exit $coverage_status)." >&2
+    echo "ERROR: cargo coverage produced no summary (exit $coverage_status); see coverage/coverage.log." >&2
     [ "$coverage_status" -ne 0 ] || coverage_status=1
     exit "$coverage_status"
 fi
 if ! percentage=$(jq -er '.data | if type == "array" and length == 1 then .[0].totals.lines.percent else error("expected one overall total") end | select(type == "number" and . >= 0 and . <= 100)' "$summary"); then
-    echo "ERROR: cargo coverage produced an invalid line-coverage summary (exit $coverage_status)." >&2
+    echo "ERROR: cargo coverage produced an invalid line-coverage summary (exit $coverage_status); see coverage/coverage.log." >&2
     [ "$coverage_status" -ne 0 ] || coverage_status=1
     exit "$coverage_status"
 fi
-echo "Measured overall line coverage: $percentage% (required floor: see cargo coverage in .cargo/config.toml)."
+LC_ALL=C awk -v percentage="$percentage" 'BEGIN { printf "Final line coverage: %.2f%%\n", percentage }'
 if [ "$coverage_status" -ne 0 ]; then
-    echo "ERROR: cargo coverage failed (exit $coverage_status); check the measurement against --fail-under-lines and the preceding compiler/test diagnostics." >&2
-    jq -r '.data[0].files // [] | sort_by(.summary.lines.percent)[] | "  \(.filename): \(.summary.lines.covered)/\(.summary.lines.count) lines (\(.summary.lines.percent)%)"' "$summary" >&2 || :
+    echo "ERROR: cargo coverage failed (exit $coverage_status); check the measurement against --fail-under-lines and coverage/coverage.log." >&2
     exit "$coverage_status"
 fi
 scripts/ci-coverage-badges.sh coverage --value "$percentage"

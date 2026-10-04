@@ -2,6 +2,7 @@
 """Isolated renderer/publication contract checks; no public assets are touched."""
 import os
 import json
+import re
 from pathlib import Path
 import stat
 import shlex
@@ -162,6 +163,8 @@ with tempfile.TemporaryDirectory() as directory:
     # Exercise the collector with real jq and rendering, but no Rust rebuild.
     cargo.write_text('''#!/bin/sh
 [ "$*" = coverage ] || exit 99
+echo "fake compiler output"
+echo "fake test output" >&2
 if [ -n "$FAKE_COVERAGE_REPORT" ]; then
     printf '%s\\n' "$FAKE_COVERAGE_REPORT" > coverage/summary.json
 fi
@@ -179,10 +182,13 @@ exit "$FAKE_COVERAGE_STATUS"
         before = Path('coverage/coverage.svg').read_bytes()
         result = run(str(REPO/'scripts/collect-coverage.sh'), ok=status == 0)
         assert result.returncode == status
-        assert f'{percentage}%' in result.stdout.decode()
+        assert result.stdout.decode() == f'Final line coverage: {percentage:.2f}%\n'
+        assert 'fake compiler output' in Path('coverage/coverage.log').read_text()
+        assert 'fake test output' in Path('coverage/coverage.log').read_text()
         if status:
             assert '--fail-under-lines' in result.stderr.decode()
-            assert 'src/example.rs: 80/100 lines (80%)' in result.stderr.decode()
+            assert 'src/example.rs' not in result.stderr.decode()
+            assert 'coverage/coverage.log' in result.stderr.decode()
             assert Path('coverage/coverage.svg').read_bytes() == before
         else:
             assert ET.parse('coverage/coverage.svg').getroot().attrib['aria-label'] == f'coverage: {percentage:.0f}%'
@@ -210,6 +216,18 @@ exit "$FAKE_COVERAGE_STATUS"
     (destination/'test.svg').mkdir()
     run(*args, 'test', ok=False)
     assert not list(destination.glob('.*.svg.*'))
+
+# Keep the alias's dependency filter portable across cache roots without
+# excluding any production module (including low-coverage startup/scan code).
+alias = next(line for line in (REPO/'.cargo/config.toml').read_text().splitlines()
+             if line.startswith('coverage = '))
+arguments = shlex.split(alias.split('"', 1)[1].rsplit('"', 1)[0])
+pattern = arguments[arguments.index('--ignore-filename-regex') + 1]
+assert arguments[arguments.index('--fail-under-lines') + 1] == '85'
+for cache in ('/root/.cargo', '/home/user/.cargo', '/custom/cargo-cache'):
+    assert re.search(pattern, cache + '/registry/src/index.crates.io-123/serde-1.0/src/lib.rs')
+for source in (REPO/'src').rglob('*.rs'):
+    assert not re.search(pattern, str(source))
 
 readme = (REPO/'README.md').read_text()
 for name in ('version', 'test', 'coverage'):
