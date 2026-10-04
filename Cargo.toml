@@ -4,6 +4,13 @@ version = "0.1.1"
 edition = "2021"
 rust-version = "1.88.0"
 license = "MIT"
+repository = "https://proxy.dandaedre.com/gitea/idle-org/tiny-wb"
+
+# Release tags are unprefixed; publisher archive names retain their -v prefix.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/{ version }/{ name }-{ target }-v{ version }.tgz"
+pkg-fmt = "tgz"
+bin-dir = "{ name }-{ target }-v{ version }/{ bin }{ binary-ext }"
 
 [dependencies]
 chrono = "0.4.38"

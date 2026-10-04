@@ -1,0 +1,18 @@
+# Public release policy; independent of runtime config/default.toml.
+[release]
+# Existing tiny-wb tags have no leading v. Do not retag historical versions.
+tag-prefix = ""
+
+[build]
+# Desktop targets. Linux uses glibc because serialport links system libudev.
+# Cross images must provide target libudev/pkg-config, lld and Windows windres.
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu"]
+profile = "release"
+locked = true
+
+[gitea]
+token-env = "GITEA_TOKEN"
+
+[[repository.fallbacks]]
+origin = "git@git.dandaedre.com:idle-org/tiny-wb.git"
+fallback-url = "https://proxy.dandaedre.com/gitea/idle-org/tiny-wb"

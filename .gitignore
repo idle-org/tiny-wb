@@ -21,3 +21,6 @@ config.toml
 
 /coverage/
 /target-ci/
+
+# rust_realease artifacts and build cache
+/dist/

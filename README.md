@@ -18,6 +18,7 @@ before connecting an Ultra or Ultra+.
 
 - [Documentation index](docs/README.md) — where to start and source policy
 - [Configuration](docs/configuration.md) — defaults, partial overrides, units, validation, and saved selections
+- [Release guide](docs/releases.md) — wrapper, target/artifact policy, token handling, and publication readiness
 - [Testing guide](docs/testing.md) — hardware-free regression tests and test boundaries
 - [Project architecture](docs/architecture.md) — components, state, data flow,
   files, dependencies, and extension points
