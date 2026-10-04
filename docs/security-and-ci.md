@@ -198,8 +198,12 @@ default Cargo-home-based filter. The log does not establish why that default
 filter missed these paths. The alias explicitly filters
 `/registry/src/` paths so dependency caches are excluded regardless of their
 home directory. All tiny-wb production sources and the **85%** floor remain
-unchanged. This corrects report scope, not test coverage. A real FreeBSD Jenkins
-rerun remains necessary to verify the corrected report on that worker.
+unchanged. This corrects report scope, not test coverage. The subsequent supplied
+FreeBSD Jenkins build #7 confirmed `Final line coverage: 90.87%` and passed the
+coverage stage. That build then stopped at Clippy's `chunks_exact_to_as_chunks`
+lint; the decoder now iterates fixed-size records with `as_chunks::<3>()`,
+compatible with the declared Rust 1.88 MSRV. Its exact frame-length validation
+still rejects incomplete records before iteration.
 
 At checkout, CI recreates ignored `coverage/` to remove stale workspace state.
 In `post { cleanup { ... } }`, it uses only current-build markers to choose test

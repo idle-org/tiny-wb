@@ -147,8 +147,11 @@ pub fn decode_frame(
         FrequencyAxis::Firmware => request.points,
     };
     let step = (request.stop_hz - request.start_hz) as f64 / intervals as f64;
+    // The exact frame length checked above guarantees no partial record remains.
     frame[1..frame.len() - 1]
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .enumerate()
         .map(|(index, record)| {
             if record[0] != b'x' {
