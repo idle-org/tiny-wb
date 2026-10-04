@@ -5,5 +5,9 @@
 
 #![warn(missing_docs)]
 
+pub mod acquisition;
 pub mod config;
+pub mod export;
+pub mod protocol;
 mod storage;
+pub mod transport;
