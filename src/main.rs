@@ -14,7 +14,6 @@ use structs::TinyError;
 use ui_struct::AppInfo;
 
 use flexi_logger::{FileSpec, Logger, WriteMode};
-use log;
 
 fn main() -> Result<(), TinyError> {
     let _logger = Logger::try_with_str("info, my::critical::module=trace")

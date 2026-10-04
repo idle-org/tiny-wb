@@ -2,26 +2,24 @@
 name = "tiny-wb"
 version = "0.1.1"
 edition = "2021"
+rust-version = "1.88.0"
+license = "MIT"
 
 [dependencies]
 chrono = "0.4.38"
-clap = { version = "4.5.17", features = ["derive"] }
 color-eyre = "0.6.3"
 flexi_logger = "0.29.0"
 # human-panic = "2.0.1"
 log = { version = "0.4.22", features = ["release_max_level_error"] }
 # log = { version = "0.4.22"}
 memchr = "2.7.4"
-once_cell = "1.19.0"
 packed_struct = "0.10.1"
-ratatui = "0.28.1"
-ratatui-splash-screen = "0.1.4"
+ratatui = "=0.30.2"
 serde = { version = "1.0.210", features = ["derive"] }
 serialport = "4.5.0"
-strum = { version = "0.26.3", features = ["derive"] }
-thiserror = "1.0.63"
+strum = { version = "0.28.0", features = ["derive"] }
+thiserror = "2.0.21"
 toml = "0.8.19"
-tui-textarea = "0.6.1"
 
 [profile.release]
 opt-level = "z"
@@ -53,4 +51,4 @@ incremental = false
 panic = "abort"
 
 [build-dependencies]
-winresource = "0.1.17"
+winresource = "=0.1.17"

@@ -50,6 +50,7 @@ pub(crate) struct AppInfo<'a> {
 }
 
 #[derive(Debug)]
+/// Numeric input state with bounded keyboard increments.
 pub(crate) struct UIUsize {
     /// Current value held by the usize
     value: usize,
@@ -153,9 +154,10 @@ macro_rules! mleft {
     };
 }
 /// The selected item in the config
-#[derive(Debug, EnumCount, FromRepr, Clone, Copy)]
+#[derive(Debug, Default, EnumCount, FromRepr, Clone, Copy)]
 pub(crate) enum SelectedConfig {
     /// Selects the ports
+    #[default]
     Port,
     /// Selects the baudrate
     Baudrate,
@@ -163,16 +165,11 @@ pub(crate) enum SelectedConfig {
     // Proceed,
 }
 
-impl Default for SelectedConfig {
-    fn default() -> Self {
-        Self::Port
-    }
-}
-
 /// The selected item in the final menu
-#[derive(Debug, EnumCount, FromRepr, Copy, Clone)]
+#[derive(Debug, Default, EnumCount, FromRepr, Copy, Clone)]
 pub(crate) enum SelectedFinalConfig {
     /// Selects the start frequency
+    #[default]
     StartFreq,
     /// Selects the final frequency
     FinalFreq,
@@ -182,12 +179,6 @@ pub(crate) enum SelectedFinalConfig {
     Repeat,
     // /// Selects <Ok> to proceed
     // Proceed,
-}
-
-impl Default for SelectedFinalConfig {
-    fn default() -> Self {
-        Self::StartFreq
-    }
 }
 
 /// The list of all baudrates selectables

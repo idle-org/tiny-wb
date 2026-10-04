@@ -7,9 +7,6 @@ use std::{
 };
 
 use flexi_logger::FlexiLoggerError;
-use log;
-use serde;
-use thiserror;
 
 use crate::ui_struct::AppInfo;
 
@@ -102,6 +99,7 @@ pub enum TinyUIError {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
+/// Configuration persisted between tiny-wb sessions.
 pub(crate) struct SavedConfig {
     /// The default com port
     pub(crate) port: String,
@@ -160,9 +158,11 @@ pub(crate) enum ConnectionStatus {
     ConnectionFailure,
     /// The connection is closed and the connection was a succes
     ClosedWithSuccess,
+    /// A scan command was accepted and acquisition has started.
     ScanStarted,
 }
 
+/// Frequency and amplitude pairs returned by a scan.
 type ScanData = Vec<(f64, f64)>;
 
 #[derive(Debug, Clone)]

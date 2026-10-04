@@ -125,6 +125,7 @@ pub(crate) fn scan_with_progress(connection_info: ConnectionInfo) -> Result<(), 
     Ok(())
 }
 
+/// Open the configured serial port and reflect failures in the shared status.
 fn acquire_port(connection_info: &ConnectionInfo) -> Result<Box<dyn SerialPort>, TinyError> {
     let port = {
         connection_info.update_message("Opening connection");
@@ -149,13 +150,16 @@ fn mode_from(start: usize, stop: usize) -> Result<String, TinyError> {
             start, stop
         )));
     }
-    match (start, stop) {
-        (350_000_000..=960_000_000, 350_000_000..=960_000_000) => Ok("high".to_string()),
-        (0..350_000_000, 0..350_000_000) => Ok("low".to_string()),
-        (240_000_000..350_000_000, 350_000_000..=960_000_000) => Ok("high".to_string()),
-        _ => Err(TinyError::BadScanFrequencies(
+    if start >= 350_000_000 && stop <= 960_000_000 {
+        Ok("high".to_string())
+    } else if stop < 350_000_000 {
+        Ok("low".to_string())
+    } else if (240_000_000..350_000_000).contains(&start) && stop <= 960_000_000 {
+        Ok("high".to_string())
+    } else {
+        Err(TinyError::BadScanFrequencies(
             "Scan frequencies must either be in range (0MHz-240MHz) or (240MHz-960MHz)".to_owned(),
-        )),
+        ))
     }
 }
 
@@ -303,7 +307,7 @@ pub fn parse_data(
         log::info!("The end looks like :{:?}", &v[end_tmp - 10..end_tmp]);
 
         let mut end = end_tmp;
-        let chunks_exact = data.chunks_exact(3);
+        let (chunks, _remainder) = data.as_chunks::<3>();
         // if chunks_exact.remainder().is_empty() {
         //     return Err(TinyError::ParseEnd(
         //         "The data received doesn't have a end char (empty)".to_owned(),
@@ -316,9 +320,8 @@ pub fn parse_data(
         //         chunks_exact.remainder()
         //     )));
         // }
-        for (i, slice) in chunks_exact.enumerate() {
-            let s: &[u8; 3] = &[slice[0], slice[1], slice[2]];
-            let d = DataPoint::unpack(s)?;
+        for (i, slice) in chunks.iter().enumerate() {
+            let d = DataPoint::unpack(slice)?;
             if d.align == b'}' {
                 // Found an end and the rest is garbage
                 end = i * 3;

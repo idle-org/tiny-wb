@@ -10,6 +10,13 @@ pipeline {
 
         RUST_BACKTRACE = '1'
 
+        // LTS-like compatibility floor verified by the dedicated MSRV stage.
+        MSRV = '1.88.0'
+
+        // Supply-chain tools are pinned for reproducible policy behavior.
+        CARGO_AUDIT_VERSION = '0.22.2'
+        CARGO_DENY_VERSION = '0.20.2'
+
         // Keep CI build products separate.
         CARGO_TARGET_DIR = "${WORKSPACE}/target-ci"
 
@@ -51,7 +58,24 @@ pipeline {
                         --component rustfmt \
                         --component clippy
 
+                    rustup toolchain install "${MSRV}" \
+                        --profile minimal
+
                     rustup default stable
+
+                    INSTALLED_AUDIT_VERSION="$(cargo audit --version 2>/dev/null | awk '{print $NF}' || true)"
+                    if [ "${INSTALLED_AUDIT_VERSION}" != "${CARGO_AUDIT_VERSION}" ]; then
+                        cargo install --locked \
+                            --version "${CARGO_AUDIT_VERSION}" \
+                            cargo-audit
+                    fi
+
+                    INSTALLED_DENY_VERSION="$(cargo deny --version 2>/dev/null | awk '{print $NF}' || true)"
+                    if [ "${INSTALLED_DENY_VERSION}" != "${CARGO_DENY_VERSION}" ]; then
+                        cargo install --locked \
+                            --version "${CARGO_DENY_VERSION}" \
+                            cargo-deny
+                    fi
 
                     # ---------------------------------------------------------
                     # LLD
@@ -92,6 +116,18 @@ pipeline {
                     cargo clippy --version
 
                     echo
+                    echo "MSRV:"
+                    rustc +"${MSRV}" --version
+
+                    echo
+                    echo "cargo-audit:"
+                    cargo audit --version
+
+                    echo
+                    echo "cargo-deny:"
+                    cargo deny --version
+
+                    echo
                     echo "Compiler:"
                     cc --version || true
 
@@ -110,6 +146,45 @@ pipeline {
                     echo
                     echo "Rust target:"
                     rustc -vV
+                '''
+            }
+        }
+
+        stage('Cargo Audit') {
+            steps {
+                sh '''
+                    set -eu
+
+                    echo "Auditing the locked dependency graph with RustSec..."
+
+                    cargo audit --deny warnings
+                '''
+            }
+        }
+
+        stage('Cargo Deny') {
+            steps {
+                sh '''
+                    set -eu
+
+                    echo "Checking dependency licenses, sources and policy..."
+
+                    cargo deny check
+                '''
+            }
+        }
+
+        stage('MSRV') {
+            steps {
+                sh '''
+                    set -eu
+
+                    echo "Checking tiny-wb with Rust ${MSRV}..."
+
+                    cargo +"${MSRV}" check \
+                        --locked \
+                        --all-targets \
+                        --all-features
                 '''
             }
         }
@@ -137,6 +212,7 @@ pipeline {
                     echo "Checking tiny-wb..."
 
                     cargo check \
+                        --locked \
                         --all-targets \
                         --all-features
                 '''
@@ -151,6 +227,7 @@ pipeline {
                     echo "Running tests..."
 
                     cargo test \
+                        --locked \
                         --all-targets \
                         --all-features
                 '''
@@ -165,8 +242,11 @@ pipeline {
                     echo "Running Clippy..."
 
                     cargo clippy \
+                        --locked \
                         --all-targets \
-                        --all-features
+                        --all-features \
+                        -- \
+                        -D warnings
                 '''
             }
         }
@@ -179,6 +259,7 @@ pipeline {
                     echo "Building tiny-wb release..."
 
                     cargo build \
+                        --locked \
                         --release \
                         --all-features
 
@@ -259,7 +340,7 @@ pipeline {
                 conclusion: 'SUCCESS',
                 name: 'Rust CI',
                 summary: 'tiny-wb passed CI.',
-                text: 'Formatting, compilation checks, tests, Clippy and the release build completed successfully. The release runtime smoke test is currently diagnostic only.',
+                text: 'RustSec audit, dependency policy, MSRV, formatting, compilation checks, tests, Clippy and the release build completed successfully. The release runtime smoke test is currently diagnostic only.',
                 title: 'Build Successful'
             )
 
@@ -271,7 +352,7 @@ pipeline {
                 conclusion: 'FAILURE',
                 name: 'Rust CI',
                 summary: 'tiny-wb failed CI.',
-                text: 'Formatting, compilation, tests, Clippy, or the release build failed. Check the Jenkins log.',
+                text: 'RustSec audit, dependency policy, MSRV, formatting, compilation, tests, Clippy, or the release build failed. Check the Jenkins log.',
                 title: 'Build Failed'
             )
 

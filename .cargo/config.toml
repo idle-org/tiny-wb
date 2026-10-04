@@ -1,2 +1,5 @@
 [build]
 rustflags = ["-Clink-arg=-fuse-ld=lld"]
+
+[resolver]
+incompatible-rust-versions = "fallback"

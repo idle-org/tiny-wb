@@ -3,7 +3,7 @@ use log::info;
 use ratatui::{
     crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Color, Modifier, Style},
     symbols::Marker,
     widgets::{Axis, Block, Chart, Dataset, GraphType, LineGauge, List, Paragraph, Wrap},
     DefaultTerminal, Frame,
@@ -68,7 +68,7 @@ impl<'a> AppInfo<'a> {
     ) -> Result<(), color_eyre::eyre::Error> {
         self.init_config()?;
         loop {
-            terminal.draw(|v| self.draw(v).inspect_err(|e| panic!("{}", e)).unwrap())?;
+            terminal.draw(|v| self.draw(v).unwrap_or_else(|e| panic!("{}", e)))?;
             let timeout = Duration::from_millis(16);
             if event::poll(timeout)? {
                 if let Event::Key(key) = event::read()? {
@@ -428,7 +428,9 @@ impl<'a> AppInfo<'a> {
             .unwrap_or(&TinyUIError::NoErrorSpecified)
         {
             TinyUIError::MenuSelectionError => "An error occured while trying to select a menu item",
-            TinyUIError::UninitializedItemList(i, _l, _ff) => &format!("The item {i} was left uninitialized"),
+            TinyUIError::UninitializedItemList(i, _l, _ff) => {
+                return Ok(format!("The item {i} was left uninitialized"));
+            }
             TinyUIError::KeyPress(_) => "An error occured while processing key events",
             TinyUIError::NoPortSelected => "No connection port was selected",
             TinyUIError::NoConnectionInfoCreated => {
