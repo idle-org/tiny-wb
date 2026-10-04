@@ -50,3 +50,7 @@ grows into many chapters, the files are already organized so that a future
 - [Agent/contributor guidance](../AGENTS.md): code structure, comments, documentation and atomic commits.
 
 - [Releases](releases.md): release wrapper, prerequisites, collision checks and publication policy.
+
+- [Feature roadmap](roadmap.md): model-aware Basic/Ultra completion tasks.
+- [Library integration](library.md): feature selection and public interfaces.
+- [Mock device](mock-device.md): in-memory and TCP simulation.

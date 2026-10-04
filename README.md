@@ -16,6 +16,10 @@ before connecting an Ultra or Ultra+.
 
 ## Documentation
 
+- [Feature completion roadmap](docs/roadmap.md) — prioritized Basic/Ultra tasks and acceptance criteria
+- [Library integration](docs/library.md) — core-only builds and optional adapters
+- [Mock device](docs/mock-device.md) — portable TCP server and deterministic testing
+
 - [Documentation index](docs/README.md) — where to start and source policy
 - [Configuration](docs/configuration.md) — defaults, partial overrides, units, validation, and saved selections
 - [Release guide](docs/releases.md) — wrapper, target/artifact policy, token handling, and publication readiness
