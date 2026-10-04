@@ -46,6 +46,8 @@ pub struct Config {
     pub points: usize,
     /// Measurements per point.
     pub repeat: usize,
+    /// Serial or TCP transport selection; TCP is useful for bridges and simulation.
+    pub connection: ConnectionConfig,
     /// Serial timing, response limits and selection preferences.
     pub serial: SerialConfig,
     /// Acquisition and numeric input policy.
@@ -56,6 +58,28 @@ pub struct Config {
     pub output: OutputConfig,
     /// File logging settings.
     pub logging: LoggingConfig,
+}
+
+/// Transport selected by the application, without changing shell framing.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Backend {
+    /// A native USB/serial port (requires the `serial` Cargo feature).
+    Serial,
+    /// A TCP bridge or mock server; tinySA hardware does not provide native TCP.
+    Tcp,
+}
+
+/// Connection settings; read deadlines apply to individual I/O operations.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectionConfig {
+    /// Which connection adapter to open.
+    pub backend: Backend,
+    /// Numeric IPv4/IPv6 socket address used for TCP (no DNS lookup).
+    pub tcp_address: String,
+    /// TCP connect, read and write timeout, in milliseconds.
+    pub tcp_timeout_ms: u64,
 }
 
 /// Serial settings, separate from the protocol's fixed byte grammar.
@@ -239,6 +263,17 @@ impl Config {
         require(
             (1..=600_000).contains(&self.serial.timeout_ms),
             "serial.timeout_ms must be in 1..=600000",
+        )?;
+        require(
+            (1..=600_000).contains(&self.connection.tcp_timeout_ms),
+            "connection.tcp_timeout_ms must be in 1..=600000",
+        )?;
+        require(
+            self.connection
+                .tcp_address
+                .parse::<std::net::SocketAddr>()
+                .is_ok_and(|address| address.port() != 0),
+            "connection.tcp_address must be a numeric IP:port with a nonzero port",
         )?;
         for delay in [
             self.serial.command_delay_ms,

@@ -8,7 +8,7 @@ mod ui;
 use error::AppError;
 use flexi_logger::{FileSpec, Logger, WriteMode};
 use std::path::PathBuf;
-use tiny_wb::config::Config;
+use tiny_wb::config::{Backend, Config};
 
 /// Restore the terminal on ordinary errors and unwinding after initialization.
 struct TerminalSession;
@@ -33,7 +33,13 @@ fn main() -> Result<(), AppError> {
         .log_to_file(FileSpec::default().directory(&config.logging.directory))
         .write_mode(WriteMode::BufferAndFlush)
         .start()?;
-    let ports = serialport::available_ports()?;
+    let ports = match config.connection.backend {
+        Backend::Serial => serialport::available_ports()?,
+        Backend::Tcp => vec![serialport::SerialPortInfo {
+            port_name: format!("tcp://{}", config.connection.tcp_address),
+            port_type: serialport::SerialPortType::Unknown,
+        }],
+    };
     let _session = TerminalSession;
     let terminal = ratatui::try_init()?;
     ui::App::new(ports, config, config_path).run(terminal)?;

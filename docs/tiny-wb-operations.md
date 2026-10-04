@@ -245,3 +245,9 @@ and richer output metadata remain open. Buffered framing, strict record-count
 validation, reusable core interfaces and hardware-free regression tests are
 implemented. Real Basic/Ultra transcript fixtures and hardware checks are still
 needed; see [architecture](architecture.md#extension-points-and-remaining-limits).
+
+## Hardware-free operation
+
+Use the [mock server](mock-device.md) with the TCP connection backend to run
+the normal acquisition and CSV workflow without USB hardware. The production
+app remains Basic-oriented; selecting the Ultra mock does not enable full Ultra support.

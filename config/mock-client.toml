@@ -1,0 +1,13 @@
+# Run the standard TUI against the Basic mock server, without USB hardware.
+points = 101
+[connection]
+backend = "tcp"
+tcp_address = "127.0.0.1:7355"
+tcp_timeout_ms = 3000
+[serial]
+command_delay_ms = 0
+settle_delay_ms = 0
+scan_delay_ms = 0
+[scan]
+frequency_axis = "firmware"
+legacy_pre_scan = false

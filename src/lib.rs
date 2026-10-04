@@ -3,6 +3,10 @@
 //! The core does not depend on terminal state. Parsers and writers accept data
 //! or I/O interfaces so callers can test them without a connected instrument.
 //!
+//! Disable default features for a library without terminal or native serial
+//! dependencies. Enable `serial` for USB access or `mock` for deterministic
+//! simulation. The application uses `tui` and `serial` by default.
+//!
 //! # Decode and export a recorded frame
 //!
 //! ```
@@ -20,7 +24,11 @@
 
 pub mod acquisition;
 pub mod config;
+pub mod connection;
 pub mod export;
+/// Opt-in deterministic simulator and TCP server support.
+#[cfg(feature = "mock")]
+pub mod mock;
 pub mod protocol;
 mod storage;
 pub mod transport;

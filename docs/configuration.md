@@ -76,3 +76,13 @@ target instrument; hardware validation remains necessary.
 Protocol delimiters, fixed-point scaling, command grammar and Basic input-path
 limits remain code invariants. Configuration cannot turn a Basic-only client
 into an Ultra-compatible one by increasing a numeric limit.
+
+## Connection backends
+
+`[connection] backend = "serial"` preserves USB behavior. Select `"tcp"` with
+`tcp_address = "127.0.0.1:7355"` and `tcp_timeout_ms = 3000` for an explicit
+mock/bridge. The address must be numeric IPv4/IPv6 with a nonzero port; timeout
+is 1–600,000 ms and applies to connect/read/write operations. All backend fields
+are validated, including inactive ones. TCP bypasses USB enumeration and ignores
+serial port/baud selections; protocol pacing still uses `[serial]` timing fields.
+See the [mock client template](../config/mock-client.toml) and [mock guide](mock-device.md).

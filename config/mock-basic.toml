@@ -1,0 +1,12 @@
+# Synthetic Basic; only the documented subset in docs/mock-device.md is implemented.
+model = "basic"
+echo = true
+read_chunk_bytes = 7
+write_chunk_bytes = 3
+max_points = 10001
+floor_dbm = -96.0
+peak_dbm = -32.0
+peak_frequency_hz = 300000000
+peak_width_hz = 10000000
+fault = "none"
+fault_command = "scanraw"

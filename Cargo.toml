@@ -12,15 +12,46 @@ pkg-url = "{ repo }/releases/download/{ version }/{ name }-{ target }-v{ version
 pkg-fmt = "tgz"
 bin-dir = "{ name }-{ target }-v{ version }/{ bin }{ binary-ext }"
 
+[features]
+default = ["tui", "serial"]
+# Core integrations can disable defaults to avoid terminal/native serial dependencies.
+tui = ["dep:color-eyre", "dep:flexi_logger", "dep:ratatui", "dep:strum", "dep:winresource"]
+serial = ["dep:serialport"]
+mock = []
+
+[lib]
+name = "tiny_wb"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tiny-wb"
+path = "src/main.rs"
+required-features = ["tui", "serial"]
+
+[[test]]
+name = "startup"
+path = "tests/startup.rs"
+required-features = ["tui", "serial"]
+
+[[example]]
+name = "mock-tinysa-server"
+path = "examples/mock-tinysa-server.rs"
+required-features = ["mock"]
+
+[[test]]
+name = "mock_device"
+path = "tests/mock_device.rs"
+required-features = ["mock"]
+
 [dependencies]
 chrono = "0.4.38"
-color-eyre = "0.6.3"
-flexi_logger = "0.29.0"
+color-eyre = { version = "0.6.3", optional = true }
+flexi_logger = { version = "0.29.0", optional = true }
 log = "0.4.22"
-ratatui = "=0.30.2"
+ratatui = { version = "=0.30.2", optional = true }
 serde = { version = "1.0.210", features = ["derive"] }
-serialport = "4.5.0"
-strum = { version = "0.28.0", features = ["derive"] }
+serialport = { version = "4.5.0", optional = true }
+strum = { version = "0.28.0", features = ["derive"], optional = true }
 thiserror = "2.0.21"
 toml = "0.8.19"
 
@@ -54,4 +85,4 @@ incremental = false
 panic = "abort"
 
 [build-dependencies]
-winresource = "=0.1.17"
+winresource = { version = "=0.1.17", optional = true }

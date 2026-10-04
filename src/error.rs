@@ -9,6 +9,9 @@ pub(crate) enum AppError {
     /// Serial enumeration or opening failed.
     #[error("serial connection: {0}")]
     Port(#[from] serialport::Error),
+    /// Configured serial/TCP connection failed before acquisition.
+    #[error(transparent)]
+    Connection(#[from] tiny_wb::connection::ConnectionError),
     /// Filesystem or terminal I/O failed.
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),

@@ -26,6 +26,14 @@ pub enum TransportError {
     /// A command contains a terminator or is empty/non-ASCII.
     #[error("a shell command must be one nonempty printable ASCII line")]
     InvalidCommand,
+    /// A checked command returned a recognizable rejection or usage response.
+    #[error("device rejected {command:?}: {response}")]
+    CommandRejected {
+        /// Command that was sent.
+        command: String,
+        /// Bounded text response from the device.
+        response: String,
+    },
     /// An invalid scan request was rejected before reading.
     #[error(transparent)]
     Protocol(#[from] ProtocolError),
@@ -110,6 +118,31 @@ impl<T: Read + Write> Shell<T> {
         let response = self.read_text()?;
         thread::sleep(settle);
         Ok(String::from_utf8_lossy(&response).into_owned())
+    }
+
+    /// Send a mutating command, rejecting recognizable error/usage responses.
+    ///
+    /// This handles common shell responses, not every firmware-specific status.
+    /// Use `command` for informational queries that intentionally return usage.
+    pub fn command_checked(
+        &mut self,
+        command: &str,
+        delay: Duration,
+        settle: Duration,
+    ) -> Result<String, TransportError> {
+        let response = self.command(command, delay, settle)?;
+        if response.lines().any(|line| {
+            let line = line.trim_start().to_ascii_lowercase();
+            line.starts_with("error:")
+                || line.starts_with("usage:")
+                || line.starts_with("unknown command")
+        }) {
+            return Err(TransportError::CommandRejected {
+                command: command.into(),
+                response,
+            });
+        }
+        Ok(response)
     }
 
     /// Consume echo, an exact raw body, then its trailing shell prompt.

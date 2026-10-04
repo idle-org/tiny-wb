@@ -7,11 +7,11 @@ use crate::error::{AppError, UiError};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex, MutexGuard},
-    time::Duration,
 };
 use tiny_wb::{
     acquisition::{acquire, ScanEvent},
     config::Config,
+    connection::open_connection,
     export::save_csv,
     protocol::ScanRequest,
     transport::Shell,
@@ -130,9 +130,7 @@ pub(crate) fn run_scan(
     request
         .input_mode()
         .map_err(tiny_wb::acquisition::AcquisitionError::from)?;
-    let port = serialport::new(&config.port, config.baudrate)
-        .timeout(Duration::from_millis(config.serial.timeout_ms))
-        .open()?;
+    let port = open_connection(&config)?;
     let mut shell = Shell::new(port, config.serial.max_response_bytes);
     let samples = acquire(
         &mut shell,

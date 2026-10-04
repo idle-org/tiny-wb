@@ -78,20 +78,20 @@ pub fn acquire<T: Read + Write>(
         log::debug!("{command}: {response}");
     }
     report(ScanEvent::Message("Configuring scan"));
-    shell.command(&format!("repeat {}", request.repeat), delay, settle)?;
-    shell.command(&format!("zero {}", scan.zero_offset), delay, settle)?;
+    shell.command_checked(&format!("repeat {}", request.repeat), delay, settle)?;
+    shell.command_checked(&format!("zero {}", scan.zero_offset), delay, settle)?;
     shell.command("marker", delay, settle)?;
     report(ScanEvent::Progress(20));
     // Pause may take effect even when its response times out, so recovery also
     // covers failure receiving the pause response itself.
     let result = (|| {
-        shell.command("pause", delay, settle)?;
-        shell.command(&format!("mode {} input", mode.as_str()), delay, settle)?;
-        shell.command(&format!("sweep start {}", request.start_hz), delay, settle)?;
-        shell.command(&format!("sweep stop {}", request.stop_hz), delay, settle)?;
-        shell.command("sweep", delay, settle)?;
+        shell.command_checked("pause", delay, settle)?;
+        shell.command_checked(&format!("mode {} input", mode.as_str()), delay, settle)?;
+        shell.command_checked(&format!("sweep start {}", request.start_hz), delay, settle)?;
+        shell.command_checked(&format!("sweep stop {}", request.stop_hz), delay, settle)?;
+        shell.command_checked("sweep", delay, settle)?;
         if scan.legacy_pre_scan {
-            shell.command(
+            shell.command_checked(
                 &format!("scan {} {} 290 101", request.start_hz, request.stop_hz),
                 Duration::from_millis(serial.scan_delay_ms),
                 settle,
@@ -112,7 +112,7 @@ pub fn acquire<T: Read + Write>(
             scan.frequency_axis,
         )?)
     })();
-    let recovery = shell.command("resume", delay, settle);
+    let recovery = shell.command_checked("resume", delay, settle);
     match (result, recovery) {
         (Ok(samples), Ok(_)) => {
             report(ScanEvent::Message("Acquisition complete"));

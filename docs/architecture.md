@@ -14,11 +14,14 @@ widgets, port discovery, worker threads, or the application's working directory.
 | `src/storage.rs` | Same-directory atomic replacement for saved configuration. |
 | `src/protocol.rs` | Basic input-path rules, scan request validation and pure raw-frame decoding. |
 | `src/transport.rs` | Buffered `Read + Write` shell I/O, complete command writes, text prompts and length-delimited raw frames. |
+| `src/connection.rs` | Runtime serial/TCP adapter; native serial is optional. |
+| `src/mock/` | Opt-in bounded device simulation and stream server. |
+| `examples/mock-tinysa-server.rs` | Portable TCP listener for the mock, outside release binaries. |
 | `src/acquisition.rs` | Command ordering, progress events, frame decoding and resume attempts. |
 | `src/export.rs` | CSV serialization to a writer and collision-safe file export. |
 | `src/main.rs` | Load configuration, start diagnostics, enumerate ports and manage terminal lifetime. |
 | `src/error.rs` | Application/UI boundary errors with original context. |
-| `src/scan.rs` | Open the serial port, adapt core events to shared progress, and export successful acquisitions. |
+| `src/scan.rs` | Open the configured connection, adapt core events to shared progress, and export successful acquisitions. |
 | `src/ui/mod.rs` | Screen transitions, keyboard handling, worker startup and progress reconciliation. |
 | `src/ui/state.rs` | UI state, configured port/baud choices and bounded numeric input. |
 | `src/ui/view.rs` | Ratatui rendering and selection styling. |
@@ -34,9 +37,9 @@ embedded defaults + runtime overrides -> validated Config
                                             |
                        ScanRequest (Hz) + selected Config
                                             |
-                                      serial worker
+                                      connection worker
                                             |
-                          Shell<SerialPort> -> acquisition
+                          Shell<Connection> -> acquisition
                                             |
                                 decode_frame -> Vec<Sample>
                                             |
@@ -124,9 +127,9 @@ See [configuration](configuration.md) for settings, paths and exact behavior.
   UI tests on Ratatui's in-memory backend. See [testing](testing.md).
 - Settings change policy and timing; wire delimiters, fixed-point scaling and
   command grammar remain protocol invariants.
-- Responses are still not parsed into explicit success/error acknowledgments;
-  an echo-only identity reply can appear nonempty. Prompt arrival is not proof
-  that a mutating command was accepted.
+- Known error/usage replies reject configuration commands, but responses are
+  not a complete typed acknowledgement protocol. An echo-only identity can
+  appear nonempty; prompt arrival alone is not proof of acceptance.
 - Serial timeouts are per-read idle timeouts, not a whole-transaction deadline.
   Cancellation/abort and complete device-state restoration remain future work.
   Quitting during a scan can terminate the worker before its resume attempt.
@@ -141,3 +144,6 @@ buffered framing instead of a separate direct `memchr` dependency. Transitive
 `memchr` use elsewhere in the graph is unrelated. Serde/TOML handle settings;
 serialport, Ratatui, chrono, log/flexi_logger, color-eyre and thiserror retain
 their device, presentation, timestamp and error-reporting roles.
+
+Library consumers can omit terminal and serial dependencies; see [feature selection](library.md).
+The [mock](mock-device.md) uses the same shell/acquisition code over memory or TCP.

@@ -1,23 +1,23 @@
-use {
-    std::{env, io},
-    winresource::WindowsResource,
-};
+//! Application-only resources; library-only builds need neither Git nor windres.
 
-use std::process::Command;
-
-fn main() -> io::Result<()> {
-    if env::var_os("CARGO_CFG_WINDOWS").is_some() {
-        WindowsResource::new()
-            // This path can be absolute, or relative to your crate root.
+#[cfg(feature = "tui")]
+fn main() -> std::io::Result<()> {
+    if std::env::var_os("CARGO_CFG_WINDOWS").is_some() {
+        winresource::WindowsResource::new()
             .set_icon("assets/icon.ico")
             .compile()?;
     }
-
-    let output = Command::new("git")
+    // Source archives and path dependencies may not have Git installed/a checkout.
+    let revision = std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
-        .unwrap();
-    let git_hash = String::from_utf8(output.stdout).unwrap();
-    println!("cargo:rustc-env=GIT_HASH={}", git_hash);
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .unwrap_or_else(|| "unknown".into());
+    println!("cargo:rustc-env=GIT_HASH={}", revision.trim());
     Ok(())
 }
+
+#[cfg(not(feature = "tui"))]
+fn main() {}

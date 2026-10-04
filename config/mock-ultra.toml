@@ -1,0 +1,14 @@
+# Synthetic Ultra identity/syntax. This does NOT enable Ultra support in the UI.
+model = "ultra"
+echo = true
+read_chunk_bytes = 7
+write_chunk_bytes = 3
+max_points = 10001
+# Simulation ceiling only; detect real model/firmware capabilities separately.
+ultra_max_hz = 6000000000
+floor_dbm = -96.0
+peak_dbm = -32.0
+peak_frequency_hz = 1000000000
+peak_width_hz = 10000000
+fault = "none"
+fault_command = "scanraw"

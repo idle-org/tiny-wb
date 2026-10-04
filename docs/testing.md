@@ -43,3 +43,30 @@ Hardware validation still requires a known model/version, safe RF input, and a
 bounded capture of the real command/response sequence. In particular, verify
 frequency-axis policy, the legacy preparatory scan, zero-offset acceptance and
 resume behavior against the connected firmware before changing their defaults.
+
+## Library feature matrix and mock integration
+
+```console
+cargo test --locked --no-default-features --lib
+cargo check --locked --no-default-features --features serial --lib
+cargo test --locked --no-default-features --features mock --lib --test mock_device
+```
+
+The mock suite includes real loopback sockets, so the test environment must
+permit localhost listeners. Tests use ephemeral ports, bounded socket timeouts
+and fresh sessions. See [mock scope and faults](mock-device.md). No mock result
+certifies device command compatibility or RF accuracy. Full hardware acceptance
+is tracked in the [roadmap](roadmap.md).
+
+Standalone example CLI and socket smoke test:
+
+```console
+cargo build --locked --no-default-features --features mock --example mock-tinysa-server
+python3 scripts/test-mock-server.py
+```
+
+With a custom `CARGO_TARGET_DIR`, pass its `debug/examples/mock-tinysa-server`
+executable path to the script (append `.exe` on Windows). This checks argument
+validation, dynamic-port binding, identity, binary scans and `--once` shutdown.
+Local Linux validation on 2026-10-04 passed; Windows/macOS runtime, actual
+hardware and Jenkins execution remain separate unverified acceptance checks.

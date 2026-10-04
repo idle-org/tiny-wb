@@ -7,6 +7,12 @@ stop_frequency = 960
 points = 10001
 repeat = 1
 
+[connection]
+backend = "serial"
+# Numeric socket address only; used by the TCP bridge/mock, not by native tinySA USB.
+tcp_address = "127.0.0.1:7355"
+tcp_timeout_ms = 3000
+
 [serial]
 # Timeout for each blocking serial read, not a whole-scan deadline.
 timeout_ms = 3000

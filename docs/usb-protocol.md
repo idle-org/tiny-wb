@@ -279,3 +279,11 @@ Use a byte-oriented program and a bounded point count instead.
 See [Project architecture](architecture.md#extension-points-and-remaining-limits) for
 remaining implementation limits and [tiny-wb operations](tiny-wb-operations.md)
 for what users can safely expect today.
+
+## Configuration command rejection
+
+`Shell::command_checked` rejects text lines beginning with `error:`, `usage:`,
+or `unknown command` (case-insensitive). Acquisition uses it for settings and
+pause/resume; diagnostic queries retain raw replies. This catches known failure
+forms, not every firmware-specific error or acknowledgement. Binary scan errors
+still fail framing/timeout checks. Model-aware replies remain roadmap work.
