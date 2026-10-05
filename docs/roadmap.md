@@ -1,5 +1,9 @@
 # tinySA feature completion roadmap
 
+For implementation subtasks, dependencies, acceptance gates and selectable
+stretch goals, use the detailed [task backlog](../task.md). Shared task IDs
+refer to the same features; this document is the concise overview.
+
 This is the task list for reaching documented feature coverage on tinySA Basic
 and tinySA Ultra. It is a plan, not a claim that either model is fully supported.
 Reviewed 2026-10-04 against the official console/menu documentation and firmware

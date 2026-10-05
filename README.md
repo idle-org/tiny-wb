@@ -16,6 +16,7 @@ before connecting an Ultra or Ultra+.
 
 ## Documentation
 
+- [Implementation tasks and stretch goals](task.md) — detailed Basic/Ultra backlog and optional features to choose
 - [Feature completion roadmap](docs/roadmap.md) — prioritized Basic/Ultra tasks and acceptance criteria
 - [Library integration](docs/library.md) — core-only builds and optional adapters
 - [Mock device](docs/mock-device.md) — portable TCP server and deterministic testing
