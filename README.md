@@ -44,6 +44,14 @@ The documentation was checked against the official tinySA wiki and firmware
 source on 2026-10-04. Instrument firmware evolves, so `help`, `version`, and
 `info` on the connected unit remain the final authority for its command set.
 
+The Basic acquisition path was validated on physical hardware on 2026-10-05
+with firmware `tinySA_v1.4-175-g1419a93`. Both the 240–300 MHz low-input scan
+and the 350–400 MHz high-input scan returned 101 valid samples, exercised the
+fixed-record binary decoder, produced CSV output, and resumed the live sweep.
+This is communications and workflow evidence, not frequency or level-accuracy
+calibration; see the [hardware validation checklist](docs/hardware-validation.md)
+for the tested scope and remaining limitations.
+
 ## Build and run
 
 Install Rust 1.88.0 or newer, connect and power on the instrument, then run:
@@ -54,6 +62,37 @@ cargo run --release
 
 On Linux the USB CDC device is commonly `/dev/ttyACM0`; on Windows it appears
 as a COM port. The user running `tiny-wb` must have permission to open it.
+
+### Linux serial permissions
+
+If `tiny-wb` or `scripts/test-hardware.sh` reports `serial connection:
+Permission denied`, inspect the device ownership after connecting the tinySA:
+
+```console
+ls -l /dev/ttyACM* /dev/ttyUSB* 2>/dev/null
+```
+
+Add your user to the group shown for the device. This is usually `dialout` on
+Debian, Ubuntu, and Fedora, or `uucp` on Arch Linux. For example:
+
+```console
+sudo usermod -aG dialout "$(id -un)"
+```
+
+Log out completely and back in for the new group membership to take effect,
+then confirm that the port is readable and writable:
+
+```console
+id -nG
+test -r /dev/ttyACM0 && test -w /dev/ttyACM0 && echo "serial access OK"
+```
+
+Close serial terminals and other tinySA software before retrying. Run the
+application or hardware validator as your normal user, not with `sudo`; avoid
+making the device world-writable with `chmod 666`, because that permission is
+overly broad and is normally lost when the device reconnects. See the
+[operations guide](docs/tiny-wb-operations.md#serial-permissions) for more
+platform setup information.
 
 The interface uses arrow keys or Vim-style `h`, `j`, `k`, `l`. Left/right
 selects a field, up/down changes its value, Enter advances, and `q` or Escape
@@ -71,7 +110,7 @@ At a high level, `tiny-wb`:
 2. identifies the instrument with `version` and `info`;
 3. configures repeat count, raw-value zero offset, input mode, and sweep;
 4. requests a binary `scanraw` acquisition;
-5. decodes each level sample into dBm and writes `frequency_MHz,dBm`;
+5. decodes each level sample into dBm and writes `frequency_MHz,level_dBm`;
 6. resumes the instrument sweep and plots the acquired points.
 
 For the exact command sequence and compatibility implications, read
