@@ -46,6 +46,15 @@ front-panel sweep resumed.
   `operator_confirmed=y` (or `yes`).
 - [ ] Each report entry records `raw_level_offset_db=128`.
 
+### Recorded Basic evidence
+
+The Basic acquisition path was validated on physical hardware on 2026-10-05
+with firmware `tinySA_v1.4-175-g1419a93`. Both the 240–300 MHz low-input scan
+and the 350–400 MHz high-input scan returned 101 valid samples, exercised the
+fixed-record binary decoder, produced CSV output, and resumed the live sweep.
+This is communications and workflow evidence, not frequency or level-accuracy
+calibration.
+
 ## Ultra acceptance and limit
 
 - [ ] The automatically selected port belongs to the Ultra.

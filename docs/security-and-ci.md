@@ -225,8 +225,14 @@ and excludes change requests and tags. The actual job configuration is not in
 this repository and remains unverified. When `BRANCH_NAME` is absent,
 publication is skipped with a diagnostic; generation and archival still run.
 Verify the job type and its branch variable before deployment. Real Jenkins
-execution, access to the asset mount, and public URL retrieval are separate
-unverified deployment checkpoints; README links alone do not make badges live.
+execution and access to the asset mount remain external deployment checkpoints.
+
+The three public URLs were retrieved on 2026-10-05. Each returned HTTP 200 with
+`image/svg+xml` content and parsed as XML. Their accessible labels reported
+version 0.1.1, tests passing, and 90% coverage; the version matches
+`Cargo.toml`. This confirms that the publication endpoint is live, but does not
+independently verify the external Jenkins job configuration or the freshness of
+its most recent build.
 
 Server configuration is external: mount public assets read-only, disable
 directory listing, serve SVG with a restrictive Content-Security-Policy, and

@@ -50,9 +50,9 @@ grows into many chapters, the files are already organized so that a future
 - [Configuration](configuration.md): embedded defaults, partial overrides and persistence.
 - [Testing](testing.md): regression seams and hardware verification boundaries.
 - [Agent/contributor guidance](../AGENTS.md): code structure, comments, documentation and atomic commits.
-
 - [Releases](releases.md): release wrapper, prerequisites, collision checks and publication policy.
-
+- [Basic and Ultra support](ultra-support.md): implemented range, model detection and qualification status.
 - [Feature roadmap](roadmap.md): model-aware Basic/Ultra completion tasks.
+- [Implementation task backlog](../task.md): detailed milestones and optional stretch goals.
 - [Library integration](library.md): feature selection and public interfaces.
 - [Mock device](mock-device.md): in-memory and TCP simulation.
