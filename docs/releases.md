@@ -71,12 +71,16 @@ For Cross installation and image setup, follow the
 `CROSS_CONTAINER_ENGINE=podman` or `docker` when necessary. Check `cross --version`,
 `cargo binstall -V`, and the selected engine's `info` command before building.
 
-The target images must provide the Linux target's libudev development files and
-pkg-config configuration, the linker required by `.cargo/config.toml` (`lld`),
-and the Windows GNU resource compiler required by `build.rs` (`windres`). Native
-host compilation alone does not verify those container prerequisites. Configure
-suitable prebuilt Cross images before building; the publisher rejects repository
-`pre-build`, `dockerfile`, and `runner` hooks, so do not silently add install hooks.
+The Linux target needs libudev development files and pkg-config configuration;
+the Windows target needs the GNU resource compiler used by `build.rs`
+(`windres`). Native host compilation alone does not verify those container
+prerequisites. [`release/Cross.toml`](../release/Cross.toml) installs
+`libudev-dev` and `pkg-config` in the Linux image. `release.sh` exports its
+absolute path as `CROSS_CONFIG` for the publisher process. The file is kept away
+from the repository root because the publisher rejects root `pre-build`,
+`dockerfile`, and `runner` hooks. Package installation requires access to the
+image's Debian/Ubuntu repositories. A caller-supplied `CROSS_CONFIG` is
+intentionally replaced so releases use the reviewed, tracked configuration.
 
 ## Token handling and commands
 
@@ -88,20 +92,26 @@ newline), rejects an empty first line, and exports it as `GITEA_TOKEN` only to
 the publisher. It never passes the token in arguments or prints it. The publisher
 is responsible for keeping it out of child builds and for download verification.
 
-In these examples, set `TOKEN_FILE` in your shell to the existing token file's
-path; it is not a checked-in setting:
+Compile-only builds do not access Gitea and need no token:
+
+```console
+./release.sh --compile-only
+```
+
+`--compile-only` builds local artifacts in ignored `dist/release-*/`, without
+contacting Gitea. Inspect `SHA256SUMS`, archive members, executables and the
+binstall layout before publication.
+
+For authenticated dry runs and publication, set `TOKEN_FILE` in your shell to
+the existing token file's path; it is not a checked-in setting:
 
 ```console
 ./release.sh "$TOKEN_FILE" --dry-run
-./release.sh "$TOKEN_FILE" --compile-only
 ```
 
 A dry run must report the correct package, version, unprefixed tag, both targets,
 asset names and public HTTPS destination without changing files, refs or releases.
 A successful dry run is required but does not replace collision inspection.
-`--compile-only` builds local artifacts in ignored `dist/release-*/`, without
-contacting Gitea. Inspect `SHA256SUMS`, archive members, executables and the
-binstall layout before publication.
 
 After all readiness checks and separate publication authorization:
 

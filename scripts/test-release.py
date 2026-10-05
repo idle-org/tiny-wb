@@ -22,6 +22,8 @@ class ReleaseWrapperTests(unittest.TestCase):
         self.project.mkdir()
         for name in ('release.sh', 'Cargo.toml', 'rust-release.toml'):
             shutil.copy2(REPO / name, self.project / name)
+        (self.project / 'release').mkdir()
+        shutil.copy2(REPO / 'release' / 'Cross.toml', self.project / 'release' / 'Cross.toml')
         self.tools = self.root / 'tools'
         self.tools.mkdir()
         # An isolated PATH tests missing publishers without relying on the host.
@@ -31,8 +33,11 @@ class ReleaseWrapperTests(unittest.TestCase):
         self.fake = self.tools / 'rust_realease'
         self.fake.write_text('#!' + sys.executable + '\n' + '''import json, os, pathlib, sys
 repository = pathlib.Path(sys.argv[1])
+cross_config = pathlib.Path(os.environ["CROSS_CONFIG"])
 record = {"args": sys.argv[1:], "token": os.environ.get("GITEA_TOKEN"),
-          "fallback": (repository / "rust-release.toml").read_text()}
+          "fallback": (repository / "rust-release.toml").read_text(),
+          "cross_config": str(cross_config),
+          "cross_config_contents": cross_config.read_text()}
 pathlib.Path(os.environ["CAPTURE"]).write_text(json.dumps(record))
 sys.exit(int(os.environ.get("PUBLISHER_EXIT", "0")))
 ''')
@@ -74,6 +79,13 @@ sys.exit(int(os.environ.get("PUBLISHER_EXIT", "0")))
                                          '--artifact-format', 'both', *extra, *prerelease])
         self.assertEqual(record['token'], 'inert-test-token-123')
         self.assertNotIn(record['token'], '\n'.join(record['args']))
+        self.assertEqual(tomllib.loads(record['cross_config_contents']), {
+            'target': {'x86_64-unknown-linux-gnu': {
+                'pre-build': [
+                    'apt-get update && apt-get install --assume-yes '
+                    '--no-install-recommends libudev-dev pkg-config']}}})
+        self.assertEqual(Path(record['cross_config']), self.project / 'release' / 'Cross.toml')
+        self.assertTrue(Path(record['cross_config']).is_file())
         config = tomllib.loads(record['fallback'])
         self.assertEqual(config['repository']['fallbacks'], [{
             'origin': before.decode().strip(),
@@ -93,7 +105,24 @@ sys.exit(int(os.environ.get("PUBLISHER_EXIT", "0")))
         self.env['PUBLISHER_EXIT'] = '37'
         self.token.write_text('inert-test-token-123')
         self.run_wrapper([str(self.token), '--compile-only'], expected=37)
-        self.assertEqual(json.loads(self.capture.read_text())['token'], 'inert-test-token-123')
+        record = json.loads(self.capture.read_text())
+        self.assertEqual(record['token'], 'inert-test-token-123')
+
+    def test_compile_only_needs_no_token(self):
+        self.run_wrapper(['--compile-only', '--recompile'])
+        record = json.loads(self.capture.read_text())
+        version = tomllib.loads((self.project / 'Cargo.toml').read_text())['package']['version']
+        prerelease = ['--prerelease'] if '-' in version.split('+', 1)[0] else []
+        self.assertEqual(record['args'], [str(self.project), '--package', 'tiny-wb',
+                                         '--artifact-format', 'both', '--compile-only',
+                                         '--recompile', *prerelease])
+        self.assertIsNone(record['token'])
+
+    def test_missing_release_cross_config_never_invokes_publisher(self):
+        (self.project / 'release' / 'Cross.toml').unlink()
+        result = self.run_wrapper(['--compile-only'], expected=2)
+        self.assertIn('release Cross configuration is missing or unreadable', result.stderr)
+        self.assertFalse(self.capture.exists())
 
     def test_invalid_token_inputs_never_invoke_publisher(self):
         self.run_wrapper([], expected=2)

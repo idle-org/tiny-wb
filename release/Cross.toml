@@ -1,0 +1,7 @@
+# Native dependencies required by the GNU/Linux release target. This file is
+# selected explicitly by release.sh because rust_realease reserves a root
+# Cross.toml for its validated repository configuration.
+[target.x86_64-unknown-linux-gnu]
+pre-build = [
+    "apt-get update && apt-get install --assume-yes --no-install-recommends libudev-dev pkg-config",
+]
