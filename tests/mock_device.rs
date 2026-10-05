@@ -122,31 +122,55 @@ fn faults_fail_acquisition_and_attempt_recovery() {
 }
 
 #[test]
-fn rejected_pause_and_ultra_high_mode_are_not_silent_successes() {
-    for mock in [
-        MockConfig {
-            fault: MockFault::Reject,
-            fault_command: "pause".into(),
-            ..MockConfig::default()
-        },
-        MockConfig {
-            model: MockModel::Ultra,
-            ..MockConfig::default()
-        },
-    ] {
-        let mut device = MockStream::new(mock).unwrap();
-        let config = settings();
-        let error = acquire(
-            &mut Shell::new(&mut device, 65536),
-            &request(),
-            &config.scan,
-            &config.serial,
-            |_| {},
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("reject"), "{error}");
-        assert!(!device.state().paused);
-    }
+fn rejected_pause_is_not_silent_success() {
+    let mut device = MockStream::new(MockConfig {
+        fault: MockFault::Reject,
+        fault_command: "pause".into(),
+        ..MockConfig::default()
+    })
+    .unwrap();
+    let config = settings();
+    let error = acquire(
+        &mut Shell::new(&mut device, 65536),
+        &request(),
+        &config.scan,
+        &config.serial,
+        |_| {},
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("reject"), "{error}");
+    assert!(!device.state().paused);
+}
+
+#[test]
+fn acquisition_detects_ultra_and_uses_native_offset_without_high_mode() {
+    let mut device = MockStream::new(MockConfig {
+        model: MockModel::Ultra,
+        ..MockConfig::default()
+    })
+    .unwrap();
+    let config = settings();
+    let samples = acquire(
+        &mut Shell::new(&mut device, 65536),
+        &request(),
+        &config.scan,
+        &config.serial,
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(samples.len(), request().points);
+    assert_eq!(device.state().zero_offset, 174);
+    assert_eq!(device.state().input, "input");
+    assert!(device
+        .state()
+        .commands
+        .iter()
+        .any(|command| command == "mode low input"));
+    assert!(!device
+        .state()
+        .commands
+        .iter()
+        .any(|command| command == "mode high input"));
 }
 
 #[test]
@@ -159,7 +183,7 @@ fn ultra_profile_and_explicit_command_subset() {
     .unwrap();
     drain(&mut device);
     assert_eq!(device.state().zero_offset, 174);
-    assert!(command(&mut device, "version").contains("Ultra"));
+    assert!(command(&mut device, "version").contains("tinySA4_v"));
     assert!(command(&mut device, "help").contains("lna ultra"));
     for cmd in [
         "mode input",

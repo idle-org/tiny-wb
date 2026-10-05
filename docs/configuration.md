@@ -44,6 +44,12 @@ use one input path. Values must be ordered. The selected baud rate must be in
 | `output` | CSV directory, filename prefix, and optional column header. |
 | `logging` | Logger filter expression and destination directory. |
 
+`scan.device_model = "auto"` detects the family before changing settings.
+`scan.auto_zero_offset = true` selects Basic 128 or Ultra 174 and verifies the
+`zero` readback. To retain a manual `scan.zero_offset`, set automatic selection
+to false. See [support and migration](ultra-support.md). The wire record has no
+model-specific padding; see [level conversion](usb-protocol.md#level-conversion-and-zero).
+
 For example, this partial file changes the serial timeout and output format
 while retaining the default scan selection:
 
@@ -63,10 +69,14 @@ file, flush, and rename. The old configuration survives validation or write
 failure. TOML formatting and comments are not preserved; retain comments in a
 separate template if needed. The configuration file's parent must exist.
 
-`scan.frequency_axis = "inclusive"` preserves the historical CSV frequency
-labels (`span / (points - 1)`). `"firmware"` uses `span / points`, matching the
-reviewed upstream implementation. Neither changes the request or proves which
-firmware is connected. See [frequency assignment](usb-protocol.md#frequency-assignment).
+`scan.frequency_axis = "firmware"` is the default. It reproduces the reviewed
+`scanraw` integer division, single-precision multiplication and conversion back
+to integer Hz. `"inclusive"` preserves the legacy tiny-wb labels
+(`span / (points - 1)`) and includes the requested stop frequency. Neither
+setting changes the request or proves RF frequency accuracy. Existing saved
+files that explicitly contain `frequency_axis = "inclusive"` keep their old
+labels; partial configurations that omit the key adopt the corrected default.
+See [frequency assignment](usb-protocol.md#frequency-assignment).
 
 The preparatory `scan START STOP 290 101` remains enabled by default with
 `scan.legacy_pre_scan = true` for compatibility. Its undocumented output mask

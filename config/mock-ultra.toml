@@ -1,4 +1,4 @@
-# Synthetic Ultra identity/syntax. This does NOT enable Ultra support in the UI.
+# Synthetic Ultra identity/syntax; production supports the common 0.1–800 MHz range.
 model = "ultra"
 echo = true
 read_chunk_bytes = 7

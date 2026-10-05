@@ -106,17 +106,34 @@ pub struct SerialConfig {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FrequencyAxis {
-    /// Preserve historical CSV labels, including the requested stop frequency.
+    /// Preserve legacy tiny-wb labels, including the requested stop frequency.
     Inclusive,
-    /// Match the reviewed firmware's `span / points` calculation.
+    /// Match the reviewed `scanraw` integer and single-precision calculation.
     Firmware,
 }
 
-/// Scan settings; Basic model frequency limits remain protocol invariants.
+/// Optional identity expectation; acquisition always detects the connected family.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelSelection {
+    /// Accept either recognized family and apply its profile automatically.
+    Auto,
+    /// Require a detected tinySA Basic.
+    Basic,
+    /// Require a detected tinySA Ultra/Ultra+ family device.
+    Ultra,
+}
+
+/// Scan settings; model-specific frequency limits are enforced by device plans.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ScanConfig {
+    /// Expected device family; `auto` still rejects unknown or conflicting identity.
+    pub device_model: ModelSelection,
+    /// Select the detected model's native raw-level offset.
+    pub auto_zero_offset: bool,
     /// Offset sent with `zero` and subtracted from raw levels, in dB.
+    /// Used only when `auto_zero_offset` is false.
     pub zero_offset: u16,
     /// Keyboard step for frequencies, in MHz.
     pub frequency_step_mhz: usize,
@@ -335,10 +352,21 @@ mod tests {
     #[test]
     fn defaults_and_legacy_settings_are_supported() {
         Config::default().validate().unwrap();
+        assert_eq!(
+            Config::default().scan.frequency_axis,
+            FrequencyAxis::Firmware
+        );
         let config = Config::from_toml("port = 'COM3'\nbaudrate = 57600\nstart_frequency = 20\nstop_frequency = 100\npoints = 101\nrepeat = 2").unwrap();
         assert_eq!(config.port, "COM3");
         assert_eq!(config.points, 101);
         assert_eq!(config.serial, Config::default().serial);
+        assert_eq!(
+            Config::from_toml("[scan]\nfrequency_axis = 'inclusive'")
+                .unwrap()
+                .scan
+                .frequency_axis,
+            FrequencyAxis::Inclusive
+        );
     }
 
     #[test]
@@ -371,6 +399,7 @@ mod tests {
             "[scan]\nmin_points = 0",
             "[scan]\nfrequency_step_mhz = 0",
             "[scan]\nzero_offset = 2048",
+            "[scan]\ndevice_model = 'unknown'",
             "[scan]\nfrequency_axis = 'unknown'",
             "[ui]\nchart_min_dbm = nan",
             "[ui]\nchart_min_dbm = 1.0",

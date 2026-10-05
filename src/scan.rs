@@ -128,7 +128,7 @@ pub(crate) fn run_scan(
     }
     config.validate()?;
     request
-        .input_mode()
+        .validate()
         .map_err(tiny_wb::acquisition::AcquisitionError::from)?;
     let port = open_connection(&config)?;
     let mut shell = Shell::new(port, config.serial.max_response_bytes);

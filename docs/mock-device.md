@@ -78,13 +78,14 @@ cargo test --locked --no-default-features --features mock --lib --test mock_devi
 
 Other commands or invalid arguments return an explicit error. No calibration,
 RF output, display capture, arbitrary firmware behavior or complete console
-emulation is claimed. The Ultra profile exercises command differences; **the
-production acquisition API and app remain Basic-oriented**. In particular,
-requests above 960 MHz are still rejected by the production request validator,
-and Basic high-input commands are rejected by the Ultra mock.
+emulation is claimed. The Ultra profile exercises automatic detection, native
+offset readback and low-input acquisition. Production Ultra scans are limited
+to 0.1–800 MHz; the mock's larger synthetic range is not a production capability.
+See [support scope](ultra-support.md).
 
-Samples use `start + index * (stop - start) / points`, a triangular peak above
-a configured floor, and `round((dBm + zero_offset) * 32)` clamped to `u16`.
+Samples use the reviewed firmware's integer-divided, single-precision
+`scanraw` point frequencies, a triangular peak above a configured floor, and
+`round((dBm + zero_offset) * 32)` clamped to `u16`.
 Frames contain `{`, repeated `x` plus little-endian `u16`, then `}` and a prompt.
 Use the firmware frequency-axis setting for matching labels. There is no noise,
 RF physics, timing model or amplitude change from LNA/repeat/Ultra toggles.

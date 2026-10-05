@@ -12,10 +12,10 @@ use std::{
 };
 use tiny_wb::{
     acquisition::{acquire, ScanEvent},
-    config::{Config, FrequencyAxis, OutputConfig},
+    config::{Config, FrequencyAxis, ModelSelection, OutputConfig},
     connection::open_connection,
     export::save_csv,
-    protocol::{Sample, ScanRequest},
+    protocol::{Sample, ScanRequest, BASIC_RAW_LEVEL_OFFSET_DB, ULTRA_RAW_LEVEL_OFFSET_DB},
     transport::Shell,
 };
 
@@ -38,6 +38,13 @@ impl Model {
         match self {
             Self::Basic => "Basic",
             Self::Ultra => "Ultra",
+        }
+    }
+
+    fn raw_level_offset_db(self) -> u16 {
+        match self {
+            Self::Basic => BASIC_RAW_LEVEL_OFFSET_DB,
+            Self::Ultra => ULTRA_RAW_LEVEL_OFFSET_DB,
         }
     }
 
@@ -215,6 +222,12 @@ fn run() -> Result<(), Box<dyn Error>> {
         config.stop_frequency = (request.stop_hz / 1_000_000) as usize;
         config.points = request.points;
         config.repeat = request.repeat;
+        config.scan.device_model = match arguments.model {
+            Model::Basic => ModelSelection::Basic,
+            Model::Ultra => ModelSelection::Ultra,
+        };
+        config.scan.auto_zero_offset = true;
+        config.scan.zero_offset = arguments.model.raw_level_offset_db();
         config.scan.frequency_axis = FrequencyAxis::Firmware;
         config.scan.legacy_pre_scan = legacy_pre_scan;
         config.validate()?;
@@ -244,10 +257,11 @@ fn run() -> Result<(), Box<dyn Error>> {
             path.display()
         );
         report.push_str(&format!(
-            "scan={name},start_hz={},stop_hz={},points={},legacy_pre_scan={},csv={}\n",
+            "scan={name},start_hz={},stop_hz={},points={},raw_level_offset_db={},legacy_pre_scan={},csv={}\n",
             request.start_hz,
             request.stop_hz,
             request.points,
+            config.scan.zero_offset,
             legacy_pre_scan,
             path.display()
         ));
@@ -294,15 +308,27 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tiny_wb::device::DeviceModel;
 
     #[test]
     fn plans_keep_ultra_on_the_shared_low_input_path() {
+        assert_eq!(Model::Basic.raw_level_offset_db(), 128);
+        assert_eq!(Model::Ultra.raw_level_offset_db(), 174);
         let basic = Model::Basic.scans();
-        assert_eq!(basic[0].1.input_mode().unwrap().as_str(), "low");
-        assert_eq!(basic[1].1.input_mode().unwrap().as_str(), "high");
+        assert_eq!(
+            DeviceModel::Basic.plan(&basic[0].1).unwrap().input_command,
+            "mode low input"
+        );
+        assert_eq!(
+            DeviceModel::Basic.plan(&basic[1].1).unwrap().input_command,
+            "mode high input"
+        );
         let ultra = Model::Ultra.scans();
         assert!(ultra.iter().all(|(_, request, _)| {
-            request.stop_hz < 350_000_000 && request.input_mode().unwrap().as_str() == "low"
+            request.stop_hz < 350_000_000
+                && DeviceModel::Ultra
+                    .plan(request)
+                    .is_ok_and(|plan| plan.input_command == "mode low input")
         }));
         assert!(ultra[0].2);
         assert!(!ultra[1].2);

@@ -12,7 +12,8 @@ widgets, port discovery, worker threads, or the application's working directory.
 | `src/config.rs` | Typed settings, recursive partial overrides, legacy-key compatibility and validation. |
 | `config/default.toml` | Authoritative embedded defaults, with units and comments. |
 | `src/storage.rs` | Same-directory atomic replacement for saved configuration. |
-| `src/protocol.rs` | Basic input-path rules, scan request validation and pure raw-frame decoding. |
+| `src/protocol.rs` | Structural scan validation, wire invariants and pure raw-frame decoding. |
+| `src/device.rs` | Family identification, model-specific ranges, input paths and native offsets. |
 | `src/transport.rs` | Buffered `Read + Write` shell I/O, complete command writes, text prompts and length-delimited raw frames. |
 | `src/connection.rs` | Runtime serial/TCP adapter; native serial is optional. |
 | `src/mock/` | Opt-in bounded device simulation and stream server. |
@@ -49,8 +50,13 @@ embedded defaults + runtime overrides -> validated Config
 `ScanRequest` carries Hz, sample count and repeat count. `Sample` carries MHz
 and dBm. Units are converted at the UI/core boundary, not inside widgets or
 file naming. The selected zero offset is both sent to the instrument and used
-by the decoder. Frequency labeling is an explicit policy; inclusive labels
-remain the default for compatibility.
+by the decoder. Frequency labeling is an explicit policy; the default mirrors
+the reviewed firmware's integer/single-precision `scanraw` calculation, while
+legacy endpoint-inclusive labels remain available for compatibility.
+Protocol constants record the native raw-level biases (Basic 128, Ultra 174).
+`device.rs` detects the family and validates its acquisition plan. Both the
+application and validator select the native bias automatically and confirm
+the readback. See [support scope](ultra-support.md).
 
 The core reports `ScanEvent` values. `ScanState` adapts them to one
 `Arc<Mutex<Progress>>`; completion publishes samples, filename, status and 100%
@@ -78,10 +84,10 @@ Process termination or release-mode panic abort cannot be recovered by a guard.
 
 ## Acquisition and protocol boundary
 
-1. Validate the Basic range and sample/repeat limits before opening/using a port.
+1. Validate structural request and sample/repeat limits before using a port.
 2. Synchronize with stale input, allowing an idle timeout only during this step.
-3. Query `version`, `info` and the existing diagnostic commands.
-4. Set `repeat` and the configured raw zero offset, then query markers.
+3. Query `version`/`info`, validate the detected model's range, check `help`, and run advertised diagnostics.
+4. Set `repeat` and the selected raw zero offset, then verify its readback.
 5. Attempt `pause`, select input mode, and configure the display sweep.
 6. Optionally retain the historical `scan START STOP 290 101` preparation.
 7. Request `scanraw`, consume exactly the expected framed record count, then

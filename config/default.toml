@@ -3,7 +3,7 @@
 port = ""
 baudrate = 115200
 start_frequency = 240
-stop_frequency = 960
+stop_frequency = 800
 points = 10001
 repeat = 1
 
@@ -24,15 +24,22 @@ baudrates = [19200, 38400, 57600, 115200, 230400, 460800, 921600, 1843200, 20000
 preferred_ports = ["/dev/ttyACM0", "COM3", "COM5", "/dev/ttyS16"]
 
 [scan]
-# Sent with `zero`; the decoder uses this same offset.
+# Detect Basic versus Ultra from version/info and apply the corresponding scan
+# profile. `basic` or `ultra` can require (but never fake) an expected family.
+device_model = "auto"
+# Select the detected model's native scanraw bias: Basic 128, Ultra 174.
+auto_zero_offset = true
+# Manual fallback used only when auto_zero_offset is false. The selected value
+# is sent with `zero`; the decoder must use that same value.
 zero_offset = 128
 frequency_step_mhz = 10
 points_step = 100
 min_points = 101
 max_points = 1000001
 max_repeat = 1000
-# Retain historical endpoint labels. `firmware` uses span / points instead.
-frequency_axis = "inclusive"
+# Match scanraw's integer-truncated span / points mapping. Use `inclusive` only
+# to reproduce CSV files created by older tiny-wb releases.
+frequency_axis = "firmware"
 # Retain the historical preparatory text scan until hardware confirms removal.
 legacy_pre_scan = true
 

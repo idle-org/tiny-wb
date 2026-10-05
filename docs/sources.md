@@ -1,7 +1,8 @@
 # Upstream source catalogue
 
 This catalogue records the authoritative references used to build the local
-guide. It was last checked on **2026-10-04**. Prefer these primary sources over
+guide. The catalogue was checked on **2026-10-04**; the protocol and Ultra-support
+pages record their targeted **2026-10-05** source review. Prefer these primary sources over
 retailer listings, reposted manuals, videos, and forum recollections.
 
 ## Official overview and model data
@@ -80,5 +81,6 @@ When sources disagree:
 
 The local docs intentionally record two known conflicts: the wiki's textual
 “MSB LSB” description versus firmware's little-endian byte writes, and
-endpoint-inclusive intuition versus the reviewed firmware's `span / points`
-`scanraw` step. Both are explained in [the protocol guide](usb-protocol.md).
+endpoint-inclusive intuition versus the reviewed firmware's integer-divided,
+single-precision `scanraw` step. Both are explained in
+[the protocol guide](usb-protocol.md).

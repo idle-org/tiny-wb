@@ -1,12 +1,16 @@
-//! Basic input selection and pure, length-checked `scanraw` decoding.
+//! Model-independent request validation and length-checked `scanraw` decoding.
 //!
 //! Wire invariants live here: delimiters, little-endian 16-bit samples and
 //! 1/32 dB scaling. No serial port, clock, file or terminal is accessed.
 
 use crate::config::FrequencyAxis;
 
-/// Highest supported Basic frequency, in Hz. Ultra is not negotiated yet.
+/// Highest supported Basic frequency, in Hz.
 pub const BASIC_MAX_HZ: u64 = 960_000_000;
+/// Native `scanraw` level bias used by tinySA Basic firmware, in dB.
+pub const BASIC_RAW_LEVEL_OFFSET_DB: u16 = 128;
+/// Native `scanraw` level bias used by tinySA Ultra firmware, in dB.
+pub const ULTRA_RAW_LEVEL_OFFSET_DB: u16 = 174;
 /// Host allocation limit retained from the original UI.
 pub const MAX_POINTS: usize = 1_000_001;
 
@@ -32,17 +36,17 @@ pub struct ScanRequest {
     pub repeat: usize,
 }
 
-/// The Basic's physical input path; this is not an Ultra capability model.
+/// Legacy Basic input-path selection; use `DeviceModel::plan` for automatic models.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
-    /// Input path below 350 MHz.
+    /// Basic low input.
     Low,
-    /// High path, also used for a span starting at/above 240 MHz and crossing 350 MHz.
+    /// Basic high input.
     High,
 }
 
 impl InputMode {
-    /// Keyword used by the `mode ... input` shell command.
+    /// Console keyword identifying the Basic input path.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Low => "low",
@@ -82,41 +86,43 @@ pub enum ProtocolError {
 }
 
 impl ScanRequest {
-    /// Validate point/repeat bounds and choose the historical Basic input path.
+    /// Validate this request using the legacy Basic profile.
+    /// Ultra callers should use `DeviceModel::Ultra.plan` instead.
     pub fn input_mode(&self) -> Result<InputMode, ProtocolError> {
+        let plan = crate::device::DeviceModel::Basic.plan(self)?;
+        Ok(if plan.input_command == "mode high input" {
+            InputMode::High
+        } else {
+            InputMode::Low
+        })
+    }
+    /// Validate model-independent ordering and point/repeat bounds.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
         if !(2..=MAX_POINTS).contains(&self.points) || !(1..=1000).contains(&self.repeat) {
             return Err(ProtocolError::InvalidRequest(
                 "points must be 2..=1000001 and repeat 1..=1000".into(),
             ));
         }
-        if self.start_hz > self.stop_hz || self.stop_hz > BASIC_MAX_HZ {
+        if self.start_hz > self.stop_hz {
             return Err(ProtocolError::InvalidRequest(
-                "frequencies must be ordered within 0–960 MHz".into(),
+                "start frequency must not exceed stop frequency".into(),
             ));
         }
-        if self.stop_hz < 350_000_000 {
-            Ok(InputMode::Low)
-        } else if self.start_hz >= 240_000_000 {
-            Ok(InputMode::High)
-        } else {
-            Err(ProtocolError::InvalidRequest(
-                "a span crossing 350 MHz must start at or above 240 MHz".into(),
-            ))
-        }
+        Ok(())
     }
 
     /// Exact framed byte count; validation happens before multiplication/allocation.
     pub fn frame_len(&self) -> Result<usize, ProtocolError> {
-        self.input_mode()?;
+        self.validate()?;
         Ok(self.points * 3 + 2)
     }
 }
 
 /// Decode exactly one raw body, including braces and excluding echo/prompt.
 ///
-/// `zero_offset` must match the `zero` command sent to the device. Endpoint
-/// labeling is explicit because the historical host and reviewed firmware use
-/// different denominators. Malformed/short/extra records are rejected before
+/// `zero_offset` must match the `zero` command sent to the device. Frequency
+/// labeling is explicit because legacy tiny-wb output and `scanraw` use
+/// different arithmetic. Malformed/short/extra records are rejected before
 /// callers can export a completed scan.
 pub fn decode_frame(
     frame: &[u8],
@@ -142,11 +148,6 @@ pub fn decode_frame(
     if frame.last() != Some(&b'}') {
         return Err(ProtocolError::MissingEnd);
     }
-    let intervals = match axis {
-        FrequencyAxis::Inclusive => request.points - 1,
-        FrequencyAxis::Firmware => request.points,
-    };
-    let step = (request.stop_hz - request.start_hz) as f64 / intervals as f64;
     // The exact frame length checked above guarantees no partial record remains.
     frame[1..frame.len() - 1]
         .as_chunks::<3>()
@@ -161,12 +162,35 @@ pub fn decode_frame(
                 });
             }
             Ok(Sample {
-                frequency_mhz: (request.start_hz as f64 + index as f64 * step) / 1_000_000.0,
+                frequency_mhz: match axis {
+                    FrequencyAxis::Inclusive => {
+                        let intervals = request.points - 1;
+                        (request.start_hz as f64
+                            + index as f64 * (request.stop_hz - request.start_hz) as f64
+                                / intervals as f64)
+                            / 1_000_000.0
+                    }
+                    FrequencyAxis::Firmware => {
+                        firmware_frequency_hz(request, index) as f64 / 1_000_000.0
+                    }
+                },
                 level_dbm: f64::from(u16::from_le_bytes([record[1], record[2]])) / 32.0
                     - f64::from(zero_offset),
             })
         })
         .collect()
+}
+
+/// Reproduce the reviewed firmware's `scanraw` frequency expression.
+///
+/// The C implementation first performs integer division, converts that result
+/// to a 32-bit `float`, multiplies it by the point index, then truncates the
+/// product back to `freq_t` before adding `start`.
+pub(crate) fn firmware_frequency_hz(request: &ScanRequest, index: usize) -> u64 {
+    debug_assert!(index < request.points);
+    let integer_step_hz = (request.stop_hz - request.start_hz) / request.points as u64;
+    let firmware_step_hz = integer_step_hz as f32;
+    request.start_hz + (firmware_step_hz * index as f32) as u64
 }
 
 #[cfg(test)]
@@ -182,27 +206,21 @@ mod tests {
     }
 
     #[test]
-    fn basic_modes_and_boundaries() {
-        for (start_hz, stop_hz, expected) in [
-            (0, 349_999_999, Some(InputMode::Low)),
-            (0, 350_000_000, None),
-            (240_000_000, 350_000_000, Some(InputMode::High)),
-            (350_000_000, 960_000_000, Some(InputMode::High)),
-            (960_000_000, 960_000_000, Some(InputMode::High)),
-            (960_000_000, 960_000_001, None),
-            (100, 99, None),
-        ] {
-            assert_eq!(
-                ScanRequest {
-                    start_hz,
-                    stop_hz,
-                    ..request()
-                }
-                .input_mode()
-                .ok(),
-                expected
-            );
+    fn structural_request_boundaries_are_model_independent() {
+        assert!(ScanRequest {
+            start_hz: 100,
+            stop_hz: 99,
+            ..request()
         }
+        .validate()
+        .is_err());
+        assert!(ScanRequest {
+            start_hz: 0,
+            stop_hz: u64::MAX,
+            ..request()
+        }
+        .validate()
+        .is_ok());
         for points in [0, 1, MAX_POINTS + 1, usize::MAX] {
             assert!(ScanRequest {
                 points,
@@ -215,13 +233,13 @@ mod tests {
             repeat: 0,
             ..request()
         }
-        .input_mode()
+        .validate()
         .is_err());
         assert!(ScanRequest {
             repeat: 1001,
             ..request()
         }
-        .input_mode()
+        .validate()
         .is_err());
     }
 
@@ -250,6 +268,33 @@ mod tests {
                 level_dbm: -46.0
             }
         );
+    }
+
+    #[test]
+    fn firmware_axis_reproduces_integer_step_and_float_rounding() {
+        let request = ScanRequest {
+            start_hz: 0,
+            stop_hz: 10,
+            points: 3,
+            repeat: 1,
+        };
+        let samples =
+            decode_frame(b"{x\0\0x\0\0x\0\0}", &request, 0, FrequencyAxis::Firmware).unwrap();
+        assert_eq!(
+            samples
+                .iter()
+                .map(|sample| sample.frequency_mhz * 1_000_000.0)
+                .collect::<Vec<_>>(),
+            vec![0.0, 3.0, 6.0]
+        );
+
+        let request = ScanRequest {
+            start_hz: 0,
+            stop_hz: 100_000_002,
+            points: 2,
+            repeat: 1,
+        };
+        assert_eq!(firmware_frequency_hz(&request, 1), 50_000_000);
     }
 
     #[test]

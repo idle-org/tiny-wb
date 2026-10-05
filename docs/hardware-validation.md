@@ -44,6 +44,7 @@ front-panel sweep resumed.
   checking it.
 - [ ] The final `basic-report.txt` records both CSV paths and
   `operator_confirmed=y` (or `yes`).
+- [ ] Each report entry records `raw_level_offset_db=128`.
 
 ## Ultra acceptance and limit
 
@@ -56,9 +57,11 @@ front-panel sweep resumed.
   checking it.
 - [ ] The final `ultra-report.txt` records both CSV paths and
   `operator_confirmed=y` (or `yes`).
+- [ ] Each report entry records `raw_level_offset_db=174`.
 
 A passing Ultra run validates only the shared low-input command path below
-350 MHz, including `zero 128`, binary framing, CSV export, and best-effort
+350 MHz, including the native `zero 174` encoding, binary framing, CSV export,
+and best-effort
 resume. It does not validate Ultra mode, harmonic mode, LNA behavior, ranges at
 or above 350 MHz, level accuracy, or frequency accuracy. Those require
 model-aware acquisition and a controlled reference source; do not infer them

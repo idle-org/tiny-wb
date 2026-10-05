@@ -31,6 +31,11 @@ See [library integration](library.md) and [mock scope](mock-device.md).
 
 ## Priority 0 — trustworthy model-aware acquisition
 
+Initial family detection, native-offset readback and common Ultra normal-range
+planning are implemented; see [support status](ultra-support.md). The broader
+P01–P04 acceptance gates below remain open pending revision-specific profiles
+and hardware qualification.
+
 - [ ] P01 **Inventory and capability negotiation** (depends F01–F04). Capture
   `version`, `info`, `help` and matching firmware commit/build options for Basic
   and each supported Ultra revision. Create a versioned command/capability

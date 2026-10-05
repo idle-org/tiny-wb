@@ -303,11 +303,10 @@ version installed on the instrument.
 
 ## How this maps to tiny-wb
 
-tiny-wb currently chooses `mode low input` below 350 MHz and `mode high input`
-above that, limits the UI to 960 MHz, and does not inspect the model. That is a
-Basic-oriented policy. Ultra supports `mode [low] input`, has no Basic-style
-high input, and needs capability-driven ranges. Until model support is added,
-use [the compatibility matrix and cautions](tiny-wb-operations.md#compatibility-matrix).
+tiny-wb detects Basic/Ultra families and applies model-specific input commands
+and native encoding offsets. Ultra support currently covers 0.1–800 MHz;
+extended ranges and hardware qualification remain pending. See
+[support scope](ultra-support.md) and the [compatibility matrix](tiny-wb-operations.md#compatibility-matrix).
 
 For the wire format and exact command behavior, continue with
 [USB console and `scanraw` protocol](usb-protocol.md).

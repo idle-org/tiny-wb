@@ -26,7 +26,7 @@ try:
             return data
         assert response() == b'ch>'
         client.sendall(b'version\r')
-        assert b'Basic' in response()
+        assert b'tinySA_v1.4-mock' in response()
         client.sendall(b'mode high input\r')
         assert b'error:' not in response()
         client.sendall(b'scanraw 240000000 360000000 4\r')

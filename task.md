@@ -30,6 +30,11 @@ confirms their syntax and availability on the selected build.
 
 ## Current baseline
 
+Update 2026-10-05: automatic family detection, offset readback and common Ultra
+normal-range acquisition are now implemented. The table below is the planning
+baseline; [current support status](docs/ultra-support.md) supersedes its missing
+model-detection entry. Hardware and extended-range gates remain open.
+
 | Area | Delivered | Still missing |
 | --- | --- | --- |
 | Library | Terminal-independent config, framing, Basic acquisition, CSV; optional serial/mock features | Model/session API and the remaining device operations |

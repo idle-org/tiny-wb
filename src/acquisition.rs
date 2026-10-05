@@ -3,10 +3,12 @@
 //! This layer owns command ordering and progress, but not port discovery, files,
 //! UI state or threads. After attempting `pause`, it always attempts `resume`,
 //! preserving both failures when recovery also fails. This is not full device
-//! state restoration or capability negotiation.
+//! state restoration. Identity and the required command inventory are checked
+//! before model-specific settings are changed.
 
 use crate::{
-    config::{ScanConfig, SerialConfig},
+    config::{ModelSelection, ScanConfig, SerialConfig},
+    device::{DeviceError, DeviceIdentity, DeviceModel},
     protocol::{self, ProtocolError, Sample, ScanRequest},
     transport::{Shell, TransportError},
 };
@@ -38,6 +40,39 @@ pub enum AcquisitionError {
     /// An identification reply contained no content.
     #[error("the instrument returned an empty version or info reply")]
     MissingIdentity,
+    /// Identity did not unambiguously identify a supported device family.
+    #[error(transparent)]
+    Device(#[from] DeviceError),
+    /// A configured family expectation did not match the detected device.
+    #[error("configured model {expected} does not match detected {actual}")]
+    UnexpectedModel {
+        /// Family required by configuration.
+        expected: DeviceModel,
+        /// Family established from device replies.
+        actual: DeviceModel,
+    },
+    /// The device does not advertise a command required by this scan plan.
+    #[error("{model} firmware does not advertise required command {command:?}")]
+    MissingCommand {
+        /// Detected family.
+        model: DeviceModel,
+        /// Required console command verb.
+        command: &'static str,
+    },
+    /// The firmware did not return a parseable raw-level offset after setting it.
+    #[error("could not confirm the raw-level offset after configuring zero {requested}")]
+    MissingZeroReadback {
+        /// Offset sent to the device, in dB.
+        requested: u16,
+    },
+    /// The raw-level offset readback differed from the requested decoder value.
+    #[error("raw-level offset readback is {actual} dB after requesting {requested} dB")]
+    ZeroReadbackMismatch {
+        /// Offset sent to the device, in dB.
+        requested: u16,
+        /// Offset reported by the device, in dB.
+        actual: u16,
+    },
     /// Both acquisition and the subsequent resume attempt failed.
     #[error("{primary}; additionally, resume failed: {recovery}")]
     Recovery {
@@ -49,11 +84,12 @@ pub enum AcquisitionError {
     },
 }
 
-/// Execute a Basic acquisition and return validated samples without file I/O.
+/// Detect the device, execute a supported acquisition and return decoded samples.
 ///
 /// Settings should come from a validated [`crate::config::Config`]. The request
-/// is revalidated before any command. Version/info are retained verbatim; their
-/// presence does not prove the device accepted all later commands.
+/// is structurally validated before I/O and checked against the detected model
+/// before mutation. Basic supports its existing low/high paths through 960 MHz.
+/// Ultra-family support is restricted to the common normal 0.1–800 MHz range.
 pub fn acquire<T: Read + Write>(
     shell: &mut Shell<T>,
     request: &ScanRequest,
@@ -61,7 +97,7 @@ pub fn acquire<T: Read + Write>(
     serial: &SerialConfig,
     mut report: impl FnMut(ScanEvent),
 ) -> Result<Vec<Sample>, AcquisitionError> {
-    let mode = request.input_mode()?;
+    request.validate()?;
     let delay = Duration::from_millis(serial.command_delay_ms);
     let settle = Duration::from_millis(serial.settle_delay_ms);
     report(ScanEvent::Message("Identifying instrument"));
@@ -72,21 +108,72 @@ pub fn acquire<T: Read + Write>(
     if version.trim().is_empty() || info.trim().is_empty() {
         return Err(AcquisitionError::MissingIdentity);
     }
-    report(ScanEvent::InstrumentInfo(format!("{version}{info}")));
-    for command in ["leveloffset", "vbat", "usart_cfg", "threads"] {
-        let response = shell.command(command, delay, settle)?;
-        log::debug!("{command}: {response}");
+    let identity = DeviceIdentity::detect(version, info)?;
+    let expected = match scan.device_model {
+        ModelSelection::Auto => None,
+        ModelSelection::Basic => Some(DeviceModel::Basic),
+        ModelSelection::Ultra => Some(DeviceModel::Ultra),
+    };
+    if let Some(expected) = expected.filter(|expected| *expected != identity.model) {
+        return Err(AcquisitionError::UnexpectedModel {
+            expected,
+            actual: identity.model,
+        });
+    }
+    let plan = identity.model.plan(request)?;
+    let help = shell.command("help", delay, settle)?;
+    for command in [
+        "repeat", "zero", "pause", "mode", "sweep", "scanraw", "resume",
+    ]
+    .into_iter()
+    .chain(scan.legacy_pre_scan.then_some("scan"))
+    {
+        if !advertises_command(&help, command) {
+            return Err(AcquisitionError::MissingCommand {
+                model: identity.model,
+                command,
+            });
+        }
+    }
+    report(ScanEvent::InstrumentInfo(format!(
+        "Detected {} (native raw offset {} dB)\n{}{}",
+        identity.model, plan.native_zero_offset_db, identity.version, identity.info
+    )));
+    for command in ["leveloffset", "vbat", "usart_cfg", "threads", "marker"] {
+        if advertises_command(&help, command) {
+            let response = shell.command(command, delay, settle)?;
+            log::debug!("{command}: {response}");
+        }
     }
     report(ScanEvent::Message("Configuring scan"));
+    let zero_offset = if scan.auto_zero_offset {
+        plan.native_zero_offset_db
+    } else {
+        scan.zero_offset
+    };
     shell.command_checked(&format!("repeat {}", request.repeat), delay, settle)?;
-    shell.command_checked(&format!("zero {}", scan.zero_offset), delay, settle)?;
-    shell.command("marker", delay, settle)?;
+    shell.command_checked(&format!("zero {zero_offset}"), delay, settle)?;
+    let zero_response = shell.command("zero", delay, settle)?;
+    match parse_zero_offset(&zero_response) {
+        Some(actual) if actual == zero_offset => {}
+        Some(actual) => {
+            return Err(AcquisitionError::ZeroReadbackMismatch {
+                requested: zero_offset,
+                actual,
+            });
+        }
+        None => {
+            return Err(AcquisitionError::MissingZeroReadback {
+                requested: zero_offset,
+            });
+        }
+    }
     report(ScanEvent::Progress(20));
     // Pause may take effect even when its response times out, so recovery also
     // covers failure receiving the pause response itself.
     let result = (|| {
         shell.command_checked("pause", delay, settle)?;
-        shell.command_checked(&format!("mode {} input", mode.as_str()), delay, settle)?;
+        shell.command_checked(plan.input_command, delay, settle)?;
         shell.command_checked(&format!("sweep start {}", request.start_hz), delay, settle)?;
         shell.command_checked(&format!("sweep stop {}", request.stop_hz), delay, settle)?;
         shell.command_checked("sweep", delay, settle)?;
@@ -108,7 +195,7 @@ pub fn acquire<T: Read + Write>(
         Ok(protocol::decode_frame(
             &frame,
             request,
-            scan.zero_offset,
+            zero_offset,
             scan.frequency_axis,
         )?)
     })();
@@ -126,6 +213,20 @@ pub fn acquire<T: Read + Write>(
         (Err(error), Ok(_)) => Err(error),
         (Ok(_), Err(error)) => Err(error.into()),
     }
+}
+
+fn advertises_command(help: &str, command: &str) -> bool {
+    help.split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .any(|word| word.eq_ignore_ascii_case(command))
+}
+
+fn parse_zero_offset(response: &str) -> Option<u16> {
+    response.split_whitespace().find_map(|word| {
+        word.trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '-')
+            .to_ascii_lowercase()
+            .strip_suffix("dbm")
+            .and_then(|value| value.parse().ok())
+    })
 }
 
 #[cfg(test)]
@@ -177,9 +278,11 @@ mod tests {
             points: 2,
             repeat: 1,
         };
-        let mut input = b"ch>version 1\rch>Basic\rch>".to_vec();
-        // Four diagnostic queries, repeat/zero/marker, pause, mode and three sweep commands.
-        input.extend_from_slice(b"okch>".repeat(12 + usize::from(legacy)).as_slice());
+        let mut input = b"ch>tinySA_v1.4-test\r\nch>tinySA\r\nch>Commands: repeat zero pause mode sweep scan scanraw resume leveloffset vbat usart_cfg threads marker\r\nch>".to_vec();
+        // Five optional diagnostics, repeat, zero mutation/readback, pause, mode and sweep commands.
+        input.extend_from_slice(b"okch>".repeat(7).as_slice());
+        input.extend_from_slice(b"usage: zero {level}\r\n128dBm\r\nch>");
+        input.extend_from_slice(b"okch>".repeat(5 + usize::from(legacy)).as_slice());
         input.extend_from_slice(frame);
         input.extend_from_slice(b"ch>");
         if resume {
@@ -209,8 +312,9 @@ mod tests {
     fn full_acquisition_preserves_command_order_and_reports_progress() {
         let (result, commands, events) = exercise(b"{x\0\x08x\0\x10}", true, true);
         assert_eq!(result.unwrap().len(), 2);
-        assert_eq!(commands, "version\rinfo\rleveloffset\rvbat\rusart_cfg\rthreads\rrepeat 1\rzero 128\rmarker\rpause\rmode high input\rsweep start 240000000\rsweep stop 960000000\rsweep\rscan 240000000 960000000 290 101\rscanraw 240000000 960000000 2\rresume\r");
+        assert_eq!(commands, "version\rinfo\rhelp\rleveloffset\rvbat\rusart_cfg\rthreads\rmarker\rrepeat 1\rzero 128\rzero\rpause\rmode high input\rsweep start 240000000\rsweep stop 960000000\rsweep\rscan 240000000 960000000 290 101\rscanraw 240000000 960000000 2\rresume\r");
         assert_eq!(events.last(), Some(&ScanEvent::Progress(100)));
+        assert!(events.iter().any(|event| matches!(event, ScanEvent::InstrumentInfo(info) if info.contains("Detected tinySA Basic"))));
     }
 
     #[test]
@@ -234,5 +338,71 @@ mod tests {
         let (result, commands, _) = exercise(b"{y\0\x08x\0\x10}", false, true);
         assert!(matches!(result, Err(AcquisitionError::Recovery { .. })));
         assert!(commands.ends_with("resume\r"));
+    }
+
+    #[test]
+    fn help_and_zero_readback_parsers_are_token_bounded() {
+        assert!(advertises_command("Commands: scan scanraw zero", "scan"));
+        assert!(!advertises_command("Commands: scanraw", "scan"));
+        assert_eq!(
+            parse_zero_offset("usage: zero {level}\r\n174dBm\r\n"),
+            Some(174)
+        );
+        assert_eq!(parse_zero_offset("174 dBm"), None);
+    }
+
+    #[test]
+    fn failed_detection_capabilities_and_readback_stop_before_scan() {
+        for (version, info, help, zero, expected) in [
+            ("unknown", "unknown", "", "", "unsupported device"),
+            ("tinySA_v1", "tinySA Ultra", "", "", "conflicting"),
+            (
+                "tinySA4_v1",
+                "tinySA Ultra",
+                "repeat",
+                "",
+                "required command",
+            ),
+            (
+                "tinySA4_v1",
+                "tinySA Ultra",
+                "repeat zero pause mode sweep scanraw resume",
+                "128dBm",
+                "readback is 128",
+            ),
+            (
+                "tinySA4_v1",
+                "tinySA Ultra",
+                "repeat zero pause mode sweep scanraw resume",
+                "unknown",
+                "could not confirm",
+            ),
+        ] {
+            let config = Config::from_toml(
+                "[scan]\nlegacy_pre_scan=false\n[serial]\ncommand_delay_ms=0\nsettle_delay_ms=0",
+            )
+            .unwrap();
+            let commands = Arc::new(Mutex::new(Vec::new()));
+            let input = format!("ch>{version}\r\nch>{info}\r\nch>{help}\r\nch>ch>ch>{zero}\r\nch>");
+            let mut shell = Shell::new(
+                Transcript {
+                    input: Cursor::new(input.into_bytes()),
+                    commands: commands.clone(),
+                },
+                1024,
+            );
+            let request = ScanRequest {
+                start_hz: 100_000_000,
+                stop_hz: 800_000_000,
+                points: 2,
+                repeat: 1,
+            };
+            let error =
+                acquire(&mut shell, &request, &config.scan, &config.serial, |_| {}).unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+            let written = String::from_utf8(commands.lock().unwrap().clone()).unwrap();
+            assert!(!written.contains("pause\r"));
+            assert!(!written.contains("scanraw "));
+        }
     }
 }

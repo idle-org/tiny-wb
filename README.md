@@ -8,11 +8,11 @@
 sweep from a tinySA over its USB serial console and exports the result as CSV.
 It is written in Rust and uses Ratatui for the interface.
 
-The current implementation is primarily shaped around the original **tinySA
-Basic** command set and its 0–960 MHz low/high input ranges. The tinySA Ultra
-family uses much of the same console protocol, but model detection and the
-Ultra frequency ranges are not implemented yet; see the compatibility notes
-before connecting an Ultra or Ultra+.
+The application detects tinySA Basic and Ultra families automatically. Basic
+retains its low/high paths through 960 MHz; initial Ultra software support covers
+the common 0.1–800 MHz normal range with automatic raw-offset selection and
+readback. See [support scope and migration](docs/ultra-support.md) for hardware
+qualification status and extended-range limitations.
 
 ## Documentation
 
@@ -112,6 +112,18 @@ At a high level, `tiny-wb`:
 4. requests a binary `scanraw` acquisition;
 5. decodes each level sample into dBm and writes `frequency_MHz,level_dBm`;
 6. resumes the instrument sweep and plots the acquired points.
+
+By default, point frequencies reproduce the reviewed firmware's `scanraw`
+integer/single-precision calculation. The requested stop frequency is an upper
+boundary and is normally not sampled. Existing configurations that explicitly
+select `scan.frequency_axis = "inclusive"` retain the older endpoint-inclusive
+labels; see [frequency assignment](docs/usb-protocol.md#frequency-assignment).
+
+Raw `scanraw` levels also have a model-specific encoding bias: 128 dB for
+tinySA Basic and 174 dB for tinySA Ultra. This is not record padding; both use
+the same `x` plus little-endian `u16` record. Automatic detection selects and
+confirms the native offset before acquisition. See
+[level conversion and `zero`](docs/usb-protocol.md#level-conversion-and-zero).
 
 For the exact command sequence and compatibility implications, read
 [USB console and `scanraw` protocol](docs/usb-protocol.md) and

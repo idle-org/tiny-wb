@@ -1,5 +1,8 @@
 //! Bounded, stateful console simulation and an in-memory duplex stream.
 
+use crate::protocol::{
+    firmware_frequency_hz, ScanRequest, BASIC_RAW_LEVEL_OFFSET_DB, ULTRA_RAW_LEVEL_OFFSET_DB,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
@@ -187,9 +190,9 @@ impl MockStream {
             points: 101.min(config.max_points),
             repeat: 1,
             zero_offset: if config.model == MockModel::Basic {
-                128
+                BASIC_RAW_LEVEL_OFFSET_DB
             } else {
-                174
+                ULTRA_RAW_LEVEL_OFFSET_DB
             },
             lna: false,
             ultra: false,
@@ -283,18 +286,14 @@ impl MockStream {
         let invalid = || b"error: unsupported command or invalid arguments in mock\r\n".to_vec();
         match fields.as_slice() {
             [] => ok,
-            ["version"] => {
-                format!("tiny-wb mock {:?} 0.1 (synthetic)\r\n", self.state.model).into_bytes()
-            }
-            ["info"] => format!(
-                "tinySA {} mock; not real firmware\r\n",
-                if self.state.model == MockModel::Basic {
-                    "Basic"
-                } else {
-                    "Ultra"
-                }
-            )
-            .into_bytes(),
+            ["version"] => match self.state.model {
+                MockModel::Basic => b"tinySA_v1.4-mock (synthetic)\r\n".to_vec(),
+                MockModel::Ultra => b"tinySA4_v1.4-mock (synthetic)\r\n".to_vec(),
+            },
+            ["info"] => match self.state.model {
+                MockModel::Basic => b"tinySA\nmock; not real firmware\r\n".to_vec(),
+                MockModel::Ultra => b"tinySA Ultra mock; not real firmware\r\n".to_vec(),
+            },
             ["help"] => {
                 let extra = if self.state.model == MockModel::Ultra {
                     " lna ultra"
@@ -345,6 +344,9 @@ impl MockStream {
                 }
                 _ => invalid(),
             },
+            ["zero"] => {
+                format!("usage: zero {{level}}\r\n{}dBm\r\n", self.state.zero_offset).into_bytes()
+            }
             ["sweep", "start" | "stop", value] => match value.parse::<u64>() {
                 Ok(value) if value <= self.max_hz() => {
                     if fields[1] == "start" {
@@ -366,10 +368,14 @@ impl MockStream {
                     self.state.points = points;
                     let mut frame = Vec::with_capacity(points * 3 + 4);
                     frame.push(b'{');
+                    let request = ScanRequest {
+                        start_hz: start,
+                        stop_hz: stop,
+                        points,
+                        repeat: self.state.repeat,
+                    };
                     for index in 0..points {
-                        // The mock uses the reviewed firmware convention, span / points.
-                        let frequency =
-                            start as f64 + (stop - start) as f64 * index as f64 / points as f64;
+                        let frequency = firmware_frequency_hz(&request, index) as f64;
                         let strength = (1.0
                             - (frequency - self.config.peak_frequency_hz as f64).abs()
                                 / self.config.peak_width_hz as f64)

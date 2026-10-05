@@ -13,10 +13,10 @@
 //! use tiny_wb::{config::FrequencyAxis, export::write_csv, protocol::{decode_frame, ScanRequest}};
 //!
 //! let request = ScanRequest { start_hz: 240_000_000, stop_hz: 960_000_000, points: 2, repeat: 1 };
-//! let samples = decode_frame(b"{x\x00\x08x\x00\x10}", &request, 128, FrequencyAxis::Inclusive)?;
+//! let samples = decode_frame(b"{x\x00\x08x\x00\x10}", &request, 128, FrequencyAxis::Firmware)?;
 //! let mut csv = Vec::new();
 //! write_csv(&mut csv, &samples, true)?;
-//! assert_eq!(String::from_utf8(csv)?, "frequency_MHz,level_dBm\n240,-64\n960,0\n");
+//! assert_eq!(String::from_utf8(csv)?, "frequency_MHz,level_dBm\n240,-64\n600,0\n");
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
@@ -25,6 +25,7 @@
 pub mod acquisition;
 pub mod config;
 pub mod connection;
+pub mod device;
 pub mod export;
 /// Opt-in deterministic simulator and TCP server support.
 #[cfg(feature = "mock")]

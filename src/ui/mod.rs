@@ -233,7 +233,7 @@ impl App {
                     repeat: config.repeat,
                 };
                 request
-                    .input_mode()
+                    .validate()
                     .map_err(tiny_wb::acquisition::AcquisitionError::from)
                     .map_err(AppError::from)?;
                 config.save(&self.config_path).map_err(AppError::from)?;
@@ -327,7 +327,7 @@ mod tests {
         assert!(matches!(app.next_step(), Err(UiError::NoPortSelected)));
         let mut app = self::app();
         app.next_step().unwrap();
-        app.start_frequency = NumericInput::new(0, 10, 0, 960);
+        app.start_frequency = NumericInput::new(900, 10, 0, 960);
         assert!(app.next_step().is_err());
         assert_eq!(app.scan_state.status(), ScanStatus::Ready);
     }

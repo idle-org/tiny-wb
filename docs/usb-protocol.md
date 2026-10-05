@@ -103,6 +103,11 @@ Thus the framed body length is `1 + 3 * points + 1` bytes. Each level is a
 place as “MSB LSB,” the firmware source writes `val & 0xff` first and
 `val >> 8` second. The repository correctly unpacks the value as little-endian.
 
+The `x` byte is a per-record alignment marker, not padding. Basic and Ultra use
+the same braces, marker, two-byte value and exact body length; there is no
+model-specific padding in the documented or reviewed `scanraw` format. Their
+model-specific difference is the numeric level bias described below.
+
 Payload bytes are arbitrary. A payload byte can equal `{`, `}`, `x`, `c`, `h`,
 or `>`. Framing logic must only interpret `{` before the records, `x` at every
 three-byte record boundary, and `}` after exactly the requested record count
@@ -111,7 +116,8 @@ text tokens is unsafe.
 
 ## Level conversion and `zero`
 
-The documented default conversion is:
+The [official USB interface](https://tinysa.org/wiki/pmwiki.php?n=Main.USBInterface)
+documents these native conversions:
 
 ```text
 Basic dBm = raw_u16 / 32 - 128
@@ -122,21 +128,23 @@ This is a fixed-point value with 1/32 dB numeric steps. The detector itself has
 coarser effective resolution, so the encoding precision is not the same as
 measurement accuracy.
 
-Upstream firmware calculates the transmitted integer from the measured value
-plus `config.ext_zero_level`; the `zero N` command changes that offset. tiny-wb
-defaults to `zero 128` before every acquisition. `scan.zero_offset` supplies both
-the command and decoder offset; with the default it uses:
+The reviewed [firmware defaults](https://github.com/Ho-Ro/tinySA/blob/main/main.c#L1099-L1200)
+set `config.ext_zero_level` to 128 for Basic and 174 for Ultra. The
+[`scanraw` implementation](https://github.com/Ho-Ro/tinySA/blob/main/sa_cmd.c#L1221-L1267)
+adds that offset to the measured value, and the
+[`zero` handler](https://github.com/Ho-Ro/tinySA/blob/main/sa_cmd.c#L602-L609)
+lets `zero N` replace it. tiny-wb detects the family and selects its native
+offset automatically, then requires matching `zero` readback before scanning.
+For Basic this gives:
 
 ```text
 dBm = raw_u16 / 32 - 128
 ```
 
-That normalizes the wire representation to a Basic-style offset and can make
-the conversion work on firmware honoring `zero`, including Ultra. A robust
-client should still detect the model, verify the command response, and bind the
-decoder offset to the value it successfully configured. If `zero 128` is
-rejected or ignored, applying 128 to an Ultra default frame produces a 46 dB
-error.
+Ultra uses 174. Manual normalization is still available with
+`scan.auto_zero_offset = false`; readback must agree with `scan.zero_offset`.
+A mismatch would shift levels by 46 dB between native defaults, so acquisition
+now rejects missing or mismatched readback. See [support and migration](ultra-support.md).
 
 ### Worked record
 
@@ -154,31 +162,41 @@ Suppose the three bytes are:
 
 ## Frequency assignment
 
-The upstream `cmd_scanraw` implementation calculates:
+The official USB command page specifies the `scanraw` request and record count,
+but does not define a point-to-frequency formula. The upstream
+[`cmd_scanraw` implementation](https://github.com/Ho-Ro/tinySA/blob/main/sa_cmd.c#L1221-L1263),
+reviewed on 2026-10-05, is the byte-level authority used here. Its C expression
+has three relevant conversions:
 
 ```text
-firmware_step = (stop - start) / points
-frequency[i] = start + firmware_step * i       for i = 0 .. points-1
+integer_step_hz = integer_divide(stop_hz - start_hz, points)
+firmware_step_hz = float32(integer_step_hz)
+frequency_hz[i] = start_hz + truncate_to_freq_t(firmware_step_hz * float32(i))
+                    for i = 0 .. points - 1
 ```
 
-The arithmetic includes floating/intermediate and integer-frequency details
-that vary with the firmware's `freq_t`, but the denominator is visibly
-`points`, not `points - 1` in the reviewed source. Therefore the last measured
-point is one nominal step below stop.
+The denominator is `points`, not `points - 1`. Integer division discards any
+remainder before the assignment to the 32-bit `float`; multiplication can then
+round at large values before conversion back to `freq_t`. For example, a
+0–10 Hz, three-point request measures nominally at 0, 3, and 6 Hz. The requested
+stop is an upper boundary and the final point is normally roughly one step below
+it. tiny-wb's `firmware` axis reproduces these conversions, including the
+single-precision rounding.
 
-tiny-wb preserves historical output labels by default (`scan.frequency_axis = "inclusive"`):
+The default is now `scan.frequency_axis = "firmware"`. The compatibility-only
+`inclusive` setting retains labels produced by older tiny-wb releases:
 
 ```text
 host_step = (stop - start) / (points - 1)
 frequency[i] = start + host_step * i
 ```
 
-This labels the endpoints inclusively and disagrees with the reviewed firmware.
-The discrepancy grows linearly through a sweep to almost one firmware step at
-the last point. `scan.frequency_axis = "firmware"` selects the reviewed firmware
-denominator instead. Before changing the setting, capture a known narrow carrier
-with the target firmware and retain the `version` string; firmware behavior may
-change. Both conventions have synthetic regression tests, not hardware proof.
+`inclusive` labels both requested endpoints and disagrees with the reviewed
+firmware. The discrepancy grows linearly through a sweep to almost one firmware
+step at the last point. Existing saved configuration remains compatible because
+an explicit `inclusive` value is still accepted. Record the connected device's
+`version` when validating a narrow carrier: the synthetic tests establish source
+parity, not RF frequency accuracy or behavior of every firmware revision.
 
 ## Prompt and synchronization behavior
 
@@ -209,13 +227,15 @@ are decimal Hz):
 ```text
 version
 info
+help
 leveloffset
 vbat
 usart_cfg
 threads
-repeat REPEAT
-zero 128
 marker
+repeat REPEAT
+zero MODEL_OFFSET
+zero
 pause
 mode LOW_OR_HIGH input
 sweep start START
@@ -235,8 +255,9 @@ The pure decoder requires the exact record count, alignment and closing brace.
 After attempting `pause`, acquisition attempts `resume` even if frame decoding
 or a later command fails. A failed recovery is included with the original error.
 There is no cancellation protocol or full state restoration, and process exit
-can prevent recovery. Device command acceptance is not explicitly acknowledged
-beyond a prompt.
+can prevent recovery. The offset requires readback; other settings are checked
+for recognizable command errors. Optional diagnostic queries require `help`
+advertisement. See [model-specific planning](ultra-support.md).
 
 The `scan` outmask value `101` remains outside the documented three-bit mask and
 its returned data is discarded. The legacy preparation is enabled by default
