@@ -68,7 +68,10 @@ sys.exit(int(os.environ.get("PUBLISHER_EXIT", "0")))
         extra = ['--dry-run', '--message-file', 'notes with spaces; $(not-a-command) *.md']
         self.run_wrapper([self.token.name, *extra])
         record = json.loads(self.capture.read_text())
-        self.assertEqual(record['args'], [str(self.project), '--package', 'tiny-wb', '--artifact-format', 'both', *extra])
+        version = tomllib.loads((self.project / 'Cargo.toml').read_text())['package']['version']
+        prerelease = ['--prerelease'] if '-' in version.split('+', 1)[0] else []
+        self.assertEqual(record['args'], [str(self.project), '--package', 'tiny-wb',
+                                         '--artifact-format', 'both', *extra, *prerelease])
         self.assertEqual(record['token'], 'inert-test-token-123')
         self.assertNotIn(record['token'], '\n'.join(record['args']))
         config = tomllib.loads(record['fallback'])
