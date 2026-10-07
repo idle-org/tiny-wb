@@ -37,13 +37,13 @@ impl App {
                 config.start_frequency,
                 config.scan.frequency_step_mhz,
                 0,
-                960,
+                5_400,
             ),
             stop_frequency: NumericInput::new(
                 config.stop_frequency,
                 config.scan.frequency_step_mhz,
                 10,
-                960,
+                5_400,
             ),
             points: NumericInput::new(
                 config.points,
@@ -327,7 +327,7 @@ mod tests {
         assert!(matches!(app.next_step(), Err(UiError::NoPortSelected)));
         let mut app = self::app();
         app.next_step().unwrap();
-        app.start_frequency = NumericInput::new(900, 10, 0, 960);
+        app.start_frequency = NumericInput::new(900, 10, 0, 5_400);
         assert!(app.next_step().is_err());
         assert_eq!(app.scan_state.status(), ScanStatus::Ready);
     }

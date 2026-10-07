@@ -304,8 +304,10 @@ version installed on the instrument.
 ## How this maps to tiny-wb
 
 tiny-wb detects Basic/Ultra families and applies model-specific input commands
-and native encoding offsets. Ultra support currently covers 0.1–800 MHz;
-extended ranges and hardware qualification remain pending. See
+and native encoding offsets. Generic Ultra support covers 0.1–800 MHz; a
+detected ZS406 covers normal mode through 900 MHz and explicit opt-in Ultra mode
+through 5.4 GHz. Harmonic reception, ZS407 extended mode and other extended
+ranges remain unsupported; RF accuracy qualification remains pending. See
 [support scope](ultra-support.md) and the [compatibility matrix](tiny-wb-operations.md#compatibility-matrix).
 
 For the wire format and exact command behavior, continue with

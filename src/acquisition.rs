@@ -73,6 +73,16 @@ pub enum AcquisitionError {
         /// Offset reported by the device, in dB.
         actual: u16,
     },
+    /// Extended-mode sweep readback did not confirm the requested boundaries.
+    #[error("ZS406 did not confirm the requested Ultra sweep {requested_start}–{requested_stop} Hz; readback was {response:?}")]
+    SweepReadbackMismatch {
+        /// Requested lower boundary, in Hz.
+        requested_start: u64,
+        /// Requested upper boundary, in Hz.
+        requested_stop: u64,
+        /// Bounded prompt-stripped firmware response.
+        response: String,
+    },
     /// Both acquisition and the subsequent resume attempt failed.
     #[error("{primary}; additionally, resume failed: {recovery}")]
     Recovery {
@@ -89,7 +99,8 @@ pub enum AcquisitionError {
 /// Settings should come from a validated [`crate::config::Config`]. The request
 /// is structurally validated before I/O and checked against the detected model
 /// before mutation. Basic supports its existing low/high paths through 960 MHz.
-/// Ultra-family support is restricted to the common normal 0.1–800 MHz range.
+/// Ultra-family support defaults to the common normal 0.1–800 MHz range. A
+/// detected ZS406 supports 900 MHz normally and opt-in Ultra mode to 5.4 GHz.
 pub fn acquire<T: Read + Write>(
     shell: &mut Shell<T>,
     request: &ScanRequest,
@@ -120,12 +131,13 @@ pub fn acquire<T: Read + Write>(
             actual: identity.model,
         });
     }
-    let plan = identity.model.plan(request)?;
+    let plan = identity.plan(request, scan.enable_ultra_mode)?;
     let help = shell.command("help", delay, settle)?;
     for command in [
         "repeat", "zero", "pause", "mode", "sweep", "scanraw", "resume",
     ]
     .into_iter()
+    .chain(plan.enable_ultra_mode.then_some("ultra"))
     .chain(scan.legacy_pre_scan.then_some("scan"))
     {
         if !advertises_command(&help, command) {
@@ -135,9 +147,13 @@ pub fn acquire<T: Read + Write>(
             });
         }
     }
+    let revision = identity
+        .ultra_revision
+        .map(|revision| format!(" {revision}"))
+        .unwrap_or_default();
     report(ScanEvent::InstrumentInfo(format!(
-        "Detected {} (native raw offset {} dB)\n{}{}",
-        identity.model, plan.native_zero_offset_db, identity.version, identity.info
+        "Detected {}{} (native raw offset {} dB)\n{}{}",
+        identity.model, revision, plan.native_zero_offset_db, identity.version, identity.info
     )));
     for command in ["leveloffset", "vbat", "usart_cfg", "threads", "marker"] {
         if advertises_command(&help, command) {
@@ -174,9 +190,21 @@ pub fn acquire<T: Read + Write>(
     let result = (|| {
         shell.command_checked("pause", delay, settle)?;
         shell.command_checked(plan.input_command, delay, settle)?;
+        if plan.enable_ultra_mode {
+            shell.command_checked("ultra on", delay, settle)?;
+        }
         shell.command_checked(&format!("sweep start {}", request.start_hz), delay, settle)?;
         shell.command_checked(&format!("sweep stop {}", request.stop_hz), delay, settle)?;
-        shell.command_checked("sweep", delay, settle)?;
+        let sweep_response = shell.command_checked("sweep", delay, settle)?;
+        if plan.enable_ultra_mode
+            && parse_sweep_bounds(&sweep_response) != Some((request.start_hz, request.stop_hz))
+        {
+            return Err(AcquisitionError::SweepReadbackMismatch {
+                requested_start: request.start_hz,
+                requested_stop: request.stop_hz,
+                response: sweep_response,
+            });
+        }
         if scan.legacy_pre_scan {
             shell.command_checked(
                 &format!("scan {} {} 290 101", request.start_hz, request.stop_hz),
@@ -226,6 +254,16 @@ fn parse_zero_offset(response: &str) -> Option<u16> {
             .to_ascii_lowercase()
             .strip_suffix("dbm")
             .and_then(|value| value.parse().ok())
+    })
+}
+
+fn parse_sweep_bounds(response: &str) -> Option<(u64, u64)> {
+    response.lines().find_map(|line| {
+        let values: Vec<_> = line
+            .split_whitespace()
+            .filter_map(|word| word.parse::<u64>().ok())
+            .collect();
+        (values.len() >= 2).then(|| (values[0], values[1]))
     })
 }
 
@@ -349,6 +387,11 @@ mod tests {
             Some(174)
         );
         assert_eq!(parse_zero_offset("174 dBm"), None);
+        assert_eq!(
+            parse_sweep_bounds("sweep\r\n900000000 5400000000 450\r\n"),
+            Some((900_000_000, 5_400_000_000))
+        );
+        assert_eq!(parse_sweep_bounds("ok"), None);
     }
 
     #[test]
@@ -404,5 +447,56 @@ mod tests {
             assert!(!written.contains("pause\r"));
             assert!(!written.contains("scanraw "));
         }
+    }
+
+    #[test]
+    fn zs406_extended_scan_is_opt_in_and_verifies_sweep_readback() {
+        let request = ScanRequest {
+            start_hz: 900_000_000,
+            stop_hz: 5_400_000_000,
+            points: 2,
+            repeat: 1,
+        };
+        let run = |enable_ultra_mode: bool, sweep: &str| {
+            let mut config = Config::default();
+            config.scan.enable_ultra_mode = enable_ultra_mode;
+            config.scan.legacy_pre_scan = false;
+            config.serial.command_delay_ms = 0;
+            config.serial.settle_delay_ms = 0;
+            let input = format!(
+                "ch>tinySA4_v1.4-test\r\nHW Version:V0.4.6\r\nch>tinySA Ultra+ ZS406\r\nch>Commands: repeat zero pause mode ultra sweep scanraw resume\r\nch>ch>ch>174dBm\r\nch>ch>ch>ch>ch>ch>{sweep}\r\nch>{{x\0\x08x\0\x10}}ch>ch>"
+            );
+            let commands = Arc::new(Mutex::new(Vec::new()));
+            let mut shell = Shell::new(
+                Transcript {
+                    input: Cursor::new(input.into_bytes()),
+                    commands: commands.clone(),
+                },
+                1024,
+            );
+            let result = acquire(&mut shell, &request, &config.scan, &config.serial, |_| {});
+            let written = String::from_utf8(commands.lock().unwrap().clone()).unwrap();
+            (result, written)
+        };
+
+        let (result, commands) = run(false, "900000000 5400000000 450");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("enable_ultra_mode"));
+        assert!(!commands.contains("pause\r"));
+
+        let (result, commands) = run(true, "900000000 5400000000 450");
+        assert!(result.is_ok(), "{result:?}");
+        assert!(commands.contains("mode low input\rultra on\r"));
+        assert!(commands.contains("scanraw 900000000 5400000000 2\r"));
+
+        let (result, commands) = run(true, "900000000 900000000 450");
+        assert!(matches!(
+            result,
+            Err(AcquisitionError::SweepReadbackMismatch { .. })
+        ));
+        assert!(!commands.contains("scanraw "));
+        assert!(commands.ends_with("resume\r"));
     }
 }

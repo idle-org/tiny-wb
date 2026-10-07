@@ -2,9 +2,9 @@
 set -eu
 
 case "${1:-}" in
-    basic|ultra) ;;
+    basic|ultra|zs406) ;;
     *)
-        echo "usage: $0 <basic|ultra> [--port DEVICE] [--output DIRECTORY]" >&2
+        echo "usage: $0 <basic|ultra|zs406> [--port DEVICE] [--output DIRECTORY]" >&2
         exit 2
         ;;
 esac

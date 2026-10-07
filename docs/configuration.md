@@ -31,15 +31,16 @@ points = 10001
 repeat = 1
 ```
 
-Start/stop frequencies are **MHz**. The Basic envelope remains 0–960 MHz,
-with stop at least 10 MHz; the protocol separately rejects spans that cannot
-use one input path. Values must be ordered. The selected baud rate must be in
-`serial.baudrates`; points and repeat must fit the configured bounds.
+Start/stop frequencies are **MHz**. The shared entry envelope is 0–5,400 MHz,
+with stop at least 10 MHz; detected model/revision policy applies before the
+instrument is mutated. Basic remains limited to 960 MHz, generic Ultra to 800
+MHz, and ZS406 normal mode to 900 MHz. Values must be ordered. The selected baud
+rate must be in `serial.baudrates`; points and repeat must fit the configured bounds.
 
 | Section | Settings and units |
 | --- | --- |
 | `serial` | Read timeout and command/settling/pre-scan delays in milliseconds; bounded text response size in bytes; baud-rate choices and preferred ports. |
-| `scan` | Raw zero offset in dB, frequency/sample keyboard steps, sample/repeat limits, frequency-axis convention, and legacy pre-scan toggle. |
+| `scan` | Raw zero offset in dB, explicit ZS406 Ultra-mode opt-in, frequency/sample keyboard steps, sample/repeat limits, frequency-axis convention, and legacy pre-scan toggle. |
 | `ui` | Event polling interval in milliseconds and finite increasing chart bounds in dBm. |
 | `output` | CSV directory, filename prefix, and optional column header. |
 | `logging` | Logger filter expression and destination directory. |
@@ -47,7 +48,9 @@ use one input path. Values must be ordered. The selected baud rate must be in
 `scan.device_model = "auto"` detects the family before changing settings.
 `scan.auto_zero_offset = true` selects Basic 128 or Ultra 174 and verifies the
 `zero` readback. To retain a manual `scan.zero_offset`, set automatic selection
-to false. See [support and migration](ultra-support.md). The wire record has no
+to false. `scan.enable_ultra_mode = true` explicitly permits a detected ZS406
+to receive above 900 MHz through 5.4 GHz; it is false by default and never
+enables generator output. See [support and migration](ultra-support.md). The wire record has no
 model-specific padding; see [level conversion](usb-protocol.md#level-conversion-and-zero).
 
 For example, this partial file changes the serial timeout and output format

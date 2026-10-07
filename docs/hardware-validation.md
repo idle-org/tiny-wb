@@ -2,7 +2,7 @@
 
 This checklist qualifies one physical instrument and firmware build. A passing
 mock or CI run is not hardware evidence. Run the validator once with a tinySA
-Basic and once with a tinySA Ultra; keep their reports separate.
+Basic and once with each supported tinySA Ultra profile; keep reports separate.
 
 ## Before each run
 
@@ -13,6 +13,7 @@ Basic and once with a tinySA Ultra; keep their reports separate.
   can open the USB serial port without running the validator as root.
 - [ ] If the front-panel configuration matters, save a preset. The validator
   changes repeat, raw zero offset, input mode, sweep limits, and pause state.
+  The ZS406 profile also enables Ultra mode, which firmware may retain.
 
 From the repository root, run exactly one command:
 
@@ -24,6 +25,12 @@ For an Ultra, use:
 
 ```console
 scripts/test-hardware.sh ultra
+```
+
+For the ZS406 normal and non-harmonic Ultra ranges, use:
+
+```console
+scripts/test-hardware.sh zs406
 ```
 
 The script asks when to unplug and plug the instrument so it can detect the new
@@ -75,6 +82,30 @@ resume. It does not validate Ultra mode, harmonic mode, LNA behavior, ranges at
 or above 350 MHz, level accuracy, or frequency accuracy. Those require
 model-aware acquisition and a controlled reference source; do not infer them
 from this communications test.
+
+## ZS406 range acceptance
+
+- [ ] The rear label says ZS406 and identity reports `ZS406` or hardware V0.4.6.
+- [ ] `normal` (0.1–900 MHz) and `ultra` (900 MHz–5.4 GHz) each report `PASS`
+  and create 101-row CSV files with units headers.
+- [ ] The report records `enable_ultra_mode=false` for `normal`, `true` for
+  `ultra`, and `raw_level_offset_db=174` for both.
+- [ ] The live front-panel sweep resumes and the final `zs406-report.txt` records
+  affirmative operator confirmation.
+
+This validates identity, accepted sweep bounds, command ordering, binary
+framing and finite decoded values across both ranges. With no controlled RF
+source it does not establish frequency accuracy, level accuracy, sensitivity,
+spur rejection or the authenticity of displayed signals.
+
+### Recorded ZS406 evidence
+
+The ZS406 acquisition profile was validated on physical hardware on 2026-10-07
+with hardware V0.4.6 and firmware `tinySA4_v1.4-197-gaa78ccc`. The 100 kHz–900
+MHz normal scan and 900 MHz–5.4 GHz Ultra scan each returned 101 finite samples,
+confirmed the requested sweep boundaries, produced CSV output, and resumed the
+front-panel sweep. The RF input was unconnected. This is communications,
+range-acceptance and workflow evidence, not RF frequency or level calibration.
 
 ## Failure record
 

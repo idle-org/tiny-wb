@@ -13,9 +13,11 @@ workflow and for Rust applications that need its reusable acquisition library.
 
 - tinySA Basic low and high inputs are supported through 960 MHz, subject to
   the instrument's path limits.
-- tinySA Ultra and Ultra+ detection and acquisition are implemented for the
-  shared 0.1–800 MHz normal range, but still await physical hardware
-  qualification.
+- tinySA Ultra-family detection and acquisition are implemented for the shared
+  0.1–800 MHz normal range. A detected Ultra+ ZS406 additionally supports its
+  0.1–900 MHz normal range and explicit opt-in Ultra mode through 5.4 GHz.
+- ZS407 extended mode and harmonic-mode reception remain unsupported. Hardware
+  validation proves communications and framing, not RF frequency/level accuracy.
 
 See the [compatibility matrix](docs/tiny-wb-operations.md#compatibility-matrix)
 and [Ultra support scope](docs/ultra-support.md) before relying on a particular

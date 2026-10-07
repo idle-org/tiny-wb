@@ -257,7 +257,9 @@ or a later command fails. A failed recovery is included with the original error.
 There is no cancellation protocol or full state restoration, and process exit
 can prevent recovery. The offset requires readback; other settings are checked
 for recognizable command errors. Optional diagnostic queries require `help`
-advertisement. See [model-specific planning](ultra-support.md).
+advertisement. ZS406 Ultra acquisition additionally requires explicit opt-in,
+an advertised `ultra` command and exact requested `sweep` boundary readback.
+See [model-specific planning](ultra-support.md).
 
 The `scan` outmask value `101` remains outside the documented three-bit mask and
 its returned data is discarded. The legacy preparation is enabled by default

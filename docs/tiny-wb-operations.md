@@ -14,7 +14,9 @@ can represent it in the UI.
 | tinySA Basic crossing from 240–<350 MHz into 350–960 MHz | Implemented as high input | The whole scan is forced onto the high path; the low path is not stitched to it. |
 | Basic span starting below 240 MHz and ending at/above 350 MHz | Rejected | One physical path cannot cover it under the client's policy. Split it into scans. |
 | tinySA Ultra/Ultra+ 0.1–800 MHz | Implemented; awaiting hardware qualification | Family detection, `mode low input`, automatic `zero 174` and readback verification. |
-| Ultra above 800 MHz | Rejected | Revision-specific extended/normal ceilings and unlock state are not negotiated. |
+| Ultra+ ZS406 0.1–900 MHz | Hardware communications validated | Explicit ZS406/V0.4.6 identity permits the full normal-mode range; RF accuracy is not qualified. |
+| Ultra+ ZS406 above 900 MHz through 5.4 GHz | Opt-in; hardware communications validated | Requires `scan.enable_ultra_mode = true`, sends `ultra on`, and verifies sweep readback. Expect slower scans, aliases/spurs and RF-port LO leakage. |
+| ZS407 extended mode or any harmonic mode | Rejected | Their different ceilings and measurement behavior are not implemented. |
 | Generator control, live streaming, capture, calibration, firmware update | Out of scope | No corresponding application workflow exists. |
 
 At the exact 350 MHz boundary, the implementation's matching rules matter:
@@ -86,8 +88,8 @@ configurable; Basic frequency limits remain fixed protocol rules.
 
 | Field | Unit | Default | Step | Bounds |
 | --- | --- | ---: | ---: | ---: |
-| Start frequency | MHz | 240 | 10 | 0–960 |
-| Stop frequency | MHz | 800 | 10 | 10–960 (Ultra acquisition capped at 800) |
+| Start frequency | MHz | 240 | 10 | 0–5,400 (model checked after identity) |
+| Stop frequency | MHz | 800 | 10 | 10–5,400 (model checked after identity) |
 | Points | samples | 10,001 | 100 | 101–1,000,001 |
 | Repeat | measurements/point | 1 | 1 | 1–1,000 |
 
@@ -243,7 +245,7 @@ software bug; substitute a low-level known source or recorded serial fixture.
 
 ## Remaining engineering work
 
-Revision-specific detection, Ultra ranges above 800 MHz, overall
+ZS407 extended detection, harmonic ranges above 5.4 GHz, overall
 transaction deadlines, cancellation/abort, full instrument-state restoration,
 and richer output metadata remain open. Buffered framing, strict record-count
 validation, reusable core interfaces and hardware-free regression tests are

@@ -27,6 +27,10 @@ preferred_ports = ["/dev/ttyACM0", "COM3", "COM5", "/dev/ttyS16"]
 # Detect Basic versus Ultra from version/info and apply the corresponding scan
 # profile. `basic` or `ultra` can require (but never fake) an expected family.
 device_model = "auto"
+# Permit a detected ZS406 to enter Ultra mode for analyzer scans above its
+# 900 MHz normal-mode ceiling, up to 5.4 GHz. This changes instrument state and
+# acknowledges Ultra-mode alias/spur/LO-leakage limitations; it never enables RF output.
+enable_ultra_mode = false
 # Select the detected model's native scanraw bias: Basic 128, Ultra 174.
 auto_zero_offset = true
 # Manual fallback used only when auto_zero_offset is false. The selected value

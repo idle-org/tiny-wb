@@ -1,4 +1,5 @@
-# Synthetic Ultra identity/syntax; production supports the common 0.1–800 MHz range.
+# Synthetic generic Ultra identity/syntax. Production additionally recognizes
+# explicit ZS406 identity for normal scans through 900 MHz and opt-in Ultra mode.
 model = "ultra"
 echo = true
 read_chunk_bytes = 7

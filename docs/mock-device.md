@@ -80,7 +80,9 @@ Other commands or invalid arguments return an explicit error. No calibration,
 RF output, display capture, arbitrary firmware behavior or complete console
 emulation is claimed. The Ultra profile exercises automatic detection, native
 offset readback and low-input acquisition. Production Ultra scans are limited
-to 0.1–800 MHz; the mock's larger synthetic range is not a production capability.
+to its detected model/revision policy; the mock's larger synthetic range is not
+a production capability. ZS406 limits are covered by identity-policy transcript
+tests rather than inferred from this generic Ultra mock.
 See [support scope](ultra-support.md).
 
 Samples use the reviewed firmware's integer-divided, single-precision

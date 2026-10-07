@@ -23,6 +23,7 @@ use tiny_wb::{
 enum Model {
     Basic,
     Ultra,
+    Zs406,
 }
 
 impl Model {
@@ -30,6 +31,7 @@ impl Model {
         match value.to_ascii_lowercase().as_str() {
             "basic" => Some(Self::Basic),
             "ultra" => Some(Self::Ultra),
+            "zs406" => Some(Self::Zs406),
             _ => None,
         }
     }
@@ -38,17 +40,18 @@ impl Model {
         match self {
             Self::Basic => "Basic",
             Self::Ultra => "Ultra",
+            Self::Zs406 => "ZS406",
         }
     }
 
     fn raw_level_offset_db(self) -> u16 {
         match self {
             Self::Basic => BASIC_RAW_LEVEL_OFFSET_DB,
-            Self::Ultra => ULTRA_RAW_LEVEL_OFFSET_DB,
+            Self::Ultra | Self::Zs406 => ULTRA_RAW_LEVEL_OFFSET_DB,
         }
     }
 
-    fn scans(self) -> [(&'static str, ScanRequest, bool); 2] {
+    fn scans(self) -> [(&'static str, ScanRequest, bool, bool); 2] {
         let low = ScanRequest {
             start_hz: 240_000_000,
             stop_hz: 300_000_000,
@@ -61,11 +64,35 @@ impl Model {
                 stop_hz: 400_000_000,
                 ..low
             },
-            // Ultra support is experimental. Stay on the shared low-input
-            // command path until model-aware extended ranges are implemented.
+            // Generic Ultra validation stays on the shared low-input path.
             Self::Ultra => low,
+            Self::Zs406 => ScanRequest {
+                start_hz: 900_000_000,
+                stop_hz: 5_400_000_000,
+                points: 101,
+                repeat: 1,
+            },
         };
-        [("legacy", low, true), ("direct", second, false)]
+        match self {
+            Self::Zs406 => [
+                (
+                    "normal",
+                    ScanRequest {
+                        start_hz: 100_000,
+                        stop_hz: 900_000_000,
+                        points: 101,
+                        repeat: 1,
+                    },
+                    false,
+                    false,
+                ),
+                ("ultra", second, false, true),
+            ],
+            Self::Basic | Self::Ultra => [
+                ("legacy", low, true, false),
+                ("direct", second, false, false),
+            ],
+        }
     }
 }
 
@@ -76,7 +103,7 @@ struct Arguments {
 }
 
 fn usage() -> &'static str {
-    "usage: validate-hardware <basic|ultra> [--port DEVICE] [--output DIRECTORY]"
+    "usage: validate-hardware <basic|ultra|zs406> [--port DEVICE] [--output DIRECTORY]"
 }
 
 fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> Result<Arguments, String> {
@@ -209,7 +236,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         port
     );
     let mut identity = String::new();
-    for (name, request, legacy_pre_scan) in arguments.model.scans() {
+    for (name, request, legacy_pre_scan, enable_ultra_mode) in arguments.model.scans() {
         println!(
             "Running {name} scan: {}–{} MHz, {} points...",
             request.start_hz / 1_000_000,
@@ -224,8 +251,9 @@ fn run() -> Result<(), Box<dyn Error>> {
         config.repeat = request.repeat;
         config.scan.device_model = match arguments.model {
             Model::Basic => ModelSelection::Basic,
-            Model::Ultra => ModelSelection::Ultra,
+            Model::Ultra | Model::Zs406 => ModelSelection::Ultra,
         };
+        config.scan.enable_ultra_mode = enable_ultra_mode;
         config.scan.auto_zero_offset = true;
         config.scan.zero_offset = arguments.model.raw_level_offset_db();
         config.scan.frequency_axis = FrequencyAxis::Firmware;
@@ -257,12 +285,13 @@ fn run() -> Result<(), Box<dyn Error>> {
             path.display()
         );
         report.push_str(&format!(
-            "scan={name},start_hz={},stop_hz={},points={},raw_level_offset_db={},legacy_pre_scan={},csv={}\n",
+            "scan={name},start_hz={},stop_hz={},points={},raw_level_offset_db={},legacy_pre_scan={},enable_ultra_mode={},csv={}\n",
             request.start_hz,
             request.stop_hz,
             request.points,
             config.scan.zero_offset,
             legacy_pre_scan,
+            enable_ultra_mode,
             path.display()
         ));
     }
@@ -294,6 +323,8 @@ fn run() -> Result<(), Box<dyn Error>> {
     );
     if arguments.model == Model::Ultra {
         println!("Ultra result covers only the shared 240–300 MHz low-input path; extended ranges remain unsupported.");
+    } else if arguments.model == Model::Zs406 {
+        println!("ZS406 result covers normal reception through 900 MHz and opt-in non-harmonic Ultra reception through 5.4 GHz; it does not establish RF accuracy.");
     }
     Ok(())
 }
@@ -324,12 +355,18 @@ mod tests {
             "mode high input"
         );
         let ultra = Model::Ultra.scans();
-        assert!(ultra.iter().all(|(_, request, _)| {
+        assert!(ultra.iter().all(|(_, request, _, enable_ultra_mode)| {
             request.stop_hz < 350_000_000
+                && !enable_ultra_mode
                 && DeviceModel::Ultra
                     .plan(request)
                     .is_ok_and(|plan| plan.input_command == "mode low input")
         }));
+        let zs406 = Model::Zs406.scans();
+        assert_eq!(zs406[0].1.stop_hz, 900_000_000);
+        assert!(!zs406[0].3);
+        assert_eq!(zs406[1].1.stop_hz, 5_400_000_000);
+        assert!(zs406[1].3);
         assert!(ultra[0].2);
         assert!(!ultra[1].2);
     }

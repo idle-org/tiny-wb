@@ -38,7 +38,7 @@ pub struct Config {
     pub port: String,
     /// Selected baud rate, which must occur in `serial.baudrates`.
     pub baudrate: u32,
-    /// Scan start in MHz, within the Basic 0–960 MHz envelope.
+    /// Scan start in MHz, within the application's 0–5,400 MHz envelope.
     pub start_frequency: usize,
     /// Scan stop in MHz, no lower than the start.
     pub stop_frequency: usize,
@@ -130,6 +130,8 @@ pub enum ModelSelection {
 pub struct ScanConfig {
     /// Expected device family; `auto` still rejects unknown or conflicting identity.
     pub device_model: ModelSelection,
+    /// Explicitly permit ZS406 Ultra mode for analyzer scans above 900 MHz.
+    pub enable_ultra_mode: bool,
     /// Select the detected model's native raw-level offset.
     pub auto_zero_offset: bool,
     /// Offset sent with `zero` and subtracted from raw levels, in dB.
@@ -249,9 +251,9 @@ impl Config {
         )?;
         require(
             self.start_frequency <= self.stop_frequency
-                && self.stop_frequency <= 960
+                && self.stop_frequency <= 5_400
                 && self.stop_frequency >= 10,
-            "frequencies must be ordered in 0–960 MHz, with stop at least 10 MHz",
+            "frequencies must be ordered in 0–5400 MHz, with stop at least 10 MHz",
         )?;
         require(
             self.scan.min_points >= 2
@@ -269,7 +271,7 @@ impl Config {
             "repeat must be within 1..=scan.max_repeat, which cannot exceed 1000",
         )?;
         require(
-            (1..=960).contains(&self.scan.frequency_step_mhz)
+            (1..=5_400).contains(&self.scan.frequency_step_mhz)
                 && (1..=self.scan.max_points).contains(&self.scan.points_step),
             "scan keyboard steps must be positive and within their bounds",
         )?;
@@ -359,6 +361,7 @@ mod tests {
         let config = Config::from_toml("port = 'COM3'\nbaudrate = 57600\nstart_frequency = 20\nstop_frequency = 100\npoints = 101\nrepeat = 2").unwrap();
         assert_eq!(config.port, "COM3");
         assert_eq!(config.points, 101);
+        assert!(!config.scan.enable_ultra_mode);
         assert_eq!(config.serial, Config::default().serial);
         assert_eq!(
             Config::from_toml("[scan]\nfrequency_axis = 'inclusive'")
@@ -367,6 +370,12 @@ mod tests {
                 .frequency_axis,
             FrequencyAxis::Inclusive
         );
+        let zs406 = Config::from_toml(
+            "start_frequency = 900\nstop_frequency = 5400\n[scan]\nenable_ultra_mode = true",
+        )
+        .unwrap();
+        assert!(zs406.scan.enable_ultra_mode);
+        assert_eq!(zs406.stop_frequency, 5_400);
     }
 
     #[test]
@@ -389,7 +398,7 @@ mod tests {
             "broken",
             "pointz = 100",
             "points = 1",
-            "start_frequency = 961",
+            "start_frequency = 5401",
             "start_frequency = 900\nstop_frequency = 100",
             "repeat = 0",
             "[serial]\nbaudrates = []",
