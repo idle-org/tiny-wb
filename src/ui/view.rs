@@ -272,11 +272,15 @@ impl App {
         ])
         .areas(main_s);
 
+        let plot = self.plot.as_ref().ok_or(UiError::NoReturnData)?;
+        let bounds = plot.viewport.bounds();
+        let span = bounds[1] - bounds[0];
         let status = Paragraph::new(format!(
-            "The scan of {} points in the range ({}MHz - {}MHz) finished successfully",
-            self.points.value(),
-            self.start_frequency.value(),
-            self.stop_frequency.value(),
+            "{} — {} points — visible {} to {} MHz",
+            plot.label,
+            plot.data.len(),
+            format_frequency(bounds[0], span),
+            format_frequency(bounds[1], span),
         ))
         .block(Block::bordered().title("Status"))
         .style(SELECTED_COLOR);
@@ -285,28 +289,20 @@ impl App {
             .marker(Marker::Dot)
             .graph_type(GraphType::Scatter)
             .style(Style::new().yellow())
-            .data(&self.return_data)];
+            .data(&plot.data)];
+
+        let midpoint = (bounds[0] + bounds[1]) / 2.0;
 
         let chart = Chart::new(datasets)
             .x_axis(
                 Axis::default()
-                    .bounds([
-                        self.start_frequency.value() as f64,
-                        self.stop_frequency.value() as f64,
-                    ])
+                    .title("Frequency (MHz)")
+                    .bounds(bounds)
                     .style(Style::default().fg(Color::Gray))
                     .labels([
-                        format!("{}MHz", self.start_frequency),
-                        format!(
-                            "{}MHz",
-                            self.start_frequency.value()
-                                + (self
-                                    .stop_frequency
-                                    .value()
-                                    .saturating_sub(self.start_frequency.value()))
-                                    / 2
-                        ),
-                        format!("{}MHz", self.stop_frequency),
+                        format_frequency(bounds[0], span),
+                        format_frequency(midpoint, span),
+                        format_frequency(bounds[1], span),
                     ]),
             )
             .y_axis(
@@ -323,15 +319,31 @@ impl App {
                     ]),
             );
         frame.render_widget(chart, graph_area);
+        let keys = &self.config.ui.bindings;
         let footer = Paragraph::new(format!(
-            "{}, press ↲ or q to exit",
-            self.scan_state.message(),
+            "zoom {} / {}; pan {} / {}; reset {}; q exits",
+            keys.zoom_in.join("|"),
+            keys.zoom_out.join("|"),
+            keys.pan_left.join("|"),
+            keys.pan_right.join("|"),
+            keys.reset_view.join("|"),
         ))
         .centered();
         frame.render_widget(status, title_area);
         frame.render_widget(footer, footer_area);
         Ok(())
     }
+}
+
+/// Keep axis labels compact while retaining useful precision after zooming.
+fn format_frequency(value: f64, visible_span: f64) -> String {
+    let tick_spacing = visible_span / 2.0;
+    let precision = if tick_spacing >= 1.0 {
+        2
+    } else {
+        ((-tick_spacing.log10()).ceil() as usize).clamp(2, 6)
+    };
+    format!("{value:.precision$}")
 }
 
 impl App {
@@ -348,6 +360,7 @@ impl App {
         )
     }
 }
+
 impl App {
     /// Update connection selection styling after navigation.
     pub(crate) fn update_color(&mut self) -> Result<(), UiError> {
@@ -382,5 +395,17 @@ impl App {
             _ => (),
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_frequency;
+
+    #[test]
+    fn frequency_labels_gain_precision_as_the_view_narrows() {
+        assert_eq!(format_frequency(240.123_456, 100.0), "240.12");
+        assert_eq!(format_frequency(240.123_456, 0.001), "240.1235");
+        assert_eq!(format_frequency(240.123_456, 0.000_001), "240.123456");
     }
 }

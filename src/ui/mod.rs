@@ -16,8 +16,8 @@ use ratatui::{
 use serialport::SerialPortInfo;
 pub(crate) use state::App;
 use state::{
-    AppState, BaudRateList, InputDirection, MenuItems, NumericInput, PortList, SelectedConnection,
-    SelectedScan,
+    AppState, BaudRateList, InputDirection, MenuItems, NumericInput, Plot, PortList,
+    SelectedConnection, SelectedScan,
 };
 use std::{path::PathBuf, thread, time::Duration};
 use strum::EnumCount;
@@ -53,10 +53,18 @@ impl App {
             ),
             repeat: NumericInput::new(config.repeat, 1, 1, config.scan.max_repeat),
             scan_state: ScanState::default(),
-            return_data: Vec::new(),
+            plot: None,
             config,
             config_path,
         }
+    }
+
+    /// Construct the renderer directly from an already parsed CSV plot.
+    pub(crate) fn viewer(config: Config, source: PathBuf, data: Vec<(f64, f64)>) -> Self {
+        let mut app = Self::new(Vec::new(), config, PathBuf::new());
+        app.flow_state = AppState::Complete;
+        app.plot = Some(Plot::new(source.display().to_string(), data));
+        app
     }
 
     /// Drive events and rendering; worker state is reconciled before each frame.
@@ -139,6 +147,9 @@ impl App {
         if key.kind != KeyEventKind::Press {
             return Ok(());
         }
+        if matches!(self.flow_state, AppState::Complete) {
+            return self.handle_plot_key(key.code);
+        }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             KeyCode::Char('j') | KeyCode::Down => self.change_cursor_position(InputDirection::Down),
@@ -150,6 +161,38 @@ impl App {
                 _ => self.next_step()?,
             },
             _ => {}
+        }
+        Ok(())
+    }
+
+    /// Apply configured navigation keys on the plot screen.
+    fn handle_plot_key(&mut self, code: KeyCode) -> Result<(), UiError> {
+        if matches!(code, KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter) {
+            self.should_quit = true;
+            return Ok(());
+        }
+        let bindings = &self.config.ui.bindings;
+        let action = if binding_matches(&code, &bindings.zoom_in) {
+            Some(PlotAction::ZoomIn)
+        } else if binding_matches(&code, &bindings.zoom_out) {
+            Some(PlotAction::ZoomOut)
+        } else if binding_matches(&code, &bindings.pan_left) {
+            Some(PlotAction::PanLeft)
+        } else if binding_matches(&code, &bindings.pan_right) {
+            Some(PlotAction::PanRight)
+        } else if binding_matches(&code, &bindings.reset_view) {
+            Some(PlotAction::Reset)
+        } else {
+            None
+        };
+        if let (Some(plot), Some(action)) = (self.plot.as_mut(), action) {
+            match action {
+                PlotAction::ZoomIn => plot.viewport.zoom_in(),
+                PlotAction::ZoomOut => plot.viewport.zoom_out(),
+                PlotAction::PanLeft => plot.viewport.pan(InputDirection::Left),
+                PlotAction::PanRight => plot.viewport.pan(InputDirection::Right),
+                PlotAction::Reset => plot.viewport.reset(),
+            }
         }
         Ok(())
     }
@@ -261,7 +304,8 @@ impl App {
         if matches!(self.flow_state, AppState::Scanning) {
             match self.scan_state.status() {
                 ScanStatus::Complete => {
-                    self.return_data = self.scan_state.take_samples()?;
+                    let data = self.scan_state.take_samples()?;
+                    self.plot = Some(Plot::new(self.scan_state.message(), data));
                     self.flow_state = AppState::Complete;
                 }
                 ScanStatus::Failed => self.flow_state = AppState::Error,
@@ -270,6 +314,35 @@ impl App {
         }
         Ok(())
     }
+}
+
+/// Renderer action resolved from configured key names.
+#[derive(Clone, Copy)]
+enum PlotAction {
+    /// Decrease the visible span.
+    ZoomIn,
+    /// Increase the visible span.
+    ZoomOut,
+    /// Shift toward lower frequencies.
+    PanLeft,
+    /// Shift toward higher frequencies.
+    PanRight,
+    /// Restore the full span.
+    Reset,
+}
+
+/// Match a terminal key against validated character/special-key names.
+fn binding_matches(code: &KeyCode, bindings: &[String]) -> bool {
+    bindings
+        .iter()
+        .any(|binding| match (binding.as_str(), code) {
+            ("left", KeyCode::Left) | ("right", KeyCode::Right) | ("home", KeyCode::Home) => true,
+            (value, KeyCode::Char(character)) => {
+                let mut chars = value.chars();
+                chars.next() == Some(*character) && chars.next().is_none()
+            }
+            _ => false,
+        })
 }
 
 #[cfg(test)]
@@ -340,7 +413,7 @@ mod tests {
             .complete(PathBuf::from("scan.csv"), vec![(240.0, -64.0)]);
         app.refresh_scan().unwrap();
         assert!(matches!(app.flow_state, AppState::Complete));
-        assert_eq!(app.return_data, vec![(240.0, -64.0)]);
+        assert_eq!(app.plot.as_ref().unwrap().data, vec![(240.0, -64.0)]);
         app.refresh_scan().unwrap();
         app.flow_state = AppState::Scanning;
         app.scan_state.fail("disconnected");
@@ -349,11 +422,41 @@ mod tests {
     }
 
     #[test]
+    fn configured_plot_keys_zoom_pan_and_reset() {
+        let mut config = Config::default();
+        config.ui.bindings.zoom_in = vec!["z".into()];
+        let mut app = App::viewer(
+            config,
+            PathBuf::from("scan.csv"),
+            vec![
+                (100.0, -1.0),
+                (125.0, -1.5),
+                (150.0, -2.0),
+                (175.0, -1.5),
+                (200.0, -1.0),
+            ],
+        );
+        app.handle_start_keys(KeyEvent::new(KeyCode::Char('+'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.plot.as_ref().unwrap().viewport.bounds(), [100.0, 200.0]);
+        app.handle_start_keys(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.plot.as_ref().unwrap().viewport.bounds(), [125.0, 175.0]);
+        app.handle_start_keys(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.plot.as_ref().unwrap().viewport.bounds(), [137.5, 187.5]);
+        app.handle_start_keys(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.plot.as_ref().unwrap().viewport.bounds(), [100.0, 200.0]);
+    }
+
+    #[test]
     fn every_screen_renders_without_a_physical_terminal() {
         for (width, height) in [(120, 40), (40, 10), (1, 1)] {
             let mut app = app();
             app.init_config().unwrap();
             app.init_progress().unwrap();
+            app.plot = Some(Plot::new("test.csv", vec![(240.0, -64.0)]));
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             for screen in [
                 AppState::default(),

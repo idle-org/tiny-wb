@@ -47,8 +47,16 @@ cargo build --release
 ./target/release/tiny-wb
 ```
 
-The program does not currently expose meaningful command-line options; it
-starts the interactive terminal immediately. Run it from the working directory for your settings and output, or set
+With no arguments the program starts the acquisition workflow. To inspect a
+previous export without enumerating a serial device or starting acquisition,
+open its renderer directly:
+
+```console
+./target/release/tiny-wb --view scan.csv
+# A positional path is equivalent: ./target/release/tiny-wb scan.csv
+```
+
+Run it from the working directory for your settings and output, or set
 `TINY_WB_CONFIG` to another configuration path. See [configuration](configuration.md).
 
 ### Serial permissions
@@ -108,6 +116,14 @@ scatter trace. Its Y axis defaults to −128–0 dBm and uses the configured `ui
 and `ui.chart_max_dbm` bounds. Values outside those bounds are clipped visually
 even though CSV data may contain them.
 
+The frequency axis is labeled in MHz. `+` or `=` zooms in, `-` zooms out,
+Left/Right or `h`/`l` pans by a quarter of the visible span, and `0` or Home
+restores the full range. Zoom and pan stay within the frequencies present in
+the plot. Maximum zoom follows the finest positive sample spacing in the loaded
+data, and frequency labels add decimal places as the visible range narrows.
+These bindings are configurable under `[ui.bindings]`; `q`, Escape, or Enter
+exits the renderer.
+
 ## Files
 
 ### `config.toml`
@@ -144,6 +160,9 @@ resume response. Failed writes are reported and incomplete files are removed
 when possible. Enable `output.include_header` for named columns. Choose the
 frequency-label convention explicitly after reviewing the
 [frequency assignment notes](usb-protocol.md#frequency-assignment).
+The direct renderer accepts this header or headerless files, ignores blank
+lines, and reports malformed, non-finite, empty, or decreasing-frequency data
+with its CSV line number before taking over the terminal.
 
 ### Logs
 

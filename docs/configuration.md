@@ -41,7 +41,7 @@ rate must be in `serial.baudrates`; points and repeat must fit the configured bo
 | --- | --- |
 | `serial` | Read timeout and command/settling/pre-scan delays in milliseconds; bounded text response size in bytes; baud-rate choices and preferred ports. |
 | `scan` | Raw zero offset in dB, explicit ZS406 Ultra-mode opt-in, frequency/sample keyboard steps, sample/repeat limits, frequency-axis convention, and legacy pre-scan toggle. |
-| `ui` | Event polling interval in milliseconds and finite increasing chart bounds in dBm. |
+| `ui` | Event polling interval in milliseconds, finite increasing chart bounds in dBm, and plot navigation bindings. |
 | `output` | CSV directory, filename prefix, and optional column header. |
 | `logging` | Logger filter expression and destination directory. |
 
@@ -80,6 +80,20 @@ setting changes the request or proves RF frequency accuracy. Existing saved
 files that explicitly contain `frequency_axis = "inclusive"` keep their old
 labels; partial configurations that omit the key adopt the corrected default.
 See [frequency assignment](usb-protocol.md#frequency-assignment).
+
+`[ui.bindings]` configures the result/CSV renderer. Each action is a nonempty
+array of unique bindings. A binding is one printable character or `left`,
+`right`, or `home`; bindings cannot overlap between actions and `q` remains
+reserved for exit. The defaults are:
+
+```toml
+[ui.bindings]
+zoom_in = ["+", "="]
+zoom_out = ["-"]
+pan_left = ["left", "h"]
+pan_right = ["right", "l"]
+reset_view = ["0", "home"]
+```
 
 The preparatory `scan START STOP 290 101` remains enabled by default with
 `scan.legacy_pre_scan = true` for compatibility. Its undocumented output mask

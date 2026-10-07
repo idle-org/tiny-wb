@@ -52,6 +52,14 @@ poll_interval_ms = 16
 chart_min_dbm = -128.0
 chart_max_dbm = 0.0
 
+[ui.bindings]
+# Plot navigation. Values are single characters or left/right/home.
+zoom_in = ["+", "="]
+zoom_out = ["-"]
+pan_left = ["left", "h"]
+pan_right = ["right", "l"]
+reset_view = ["0", "home"]
+
 [output]
 directory = "."
 filename_prefix = "scan"

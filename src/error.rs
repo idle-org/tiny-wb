@@ -3,6 +3,9 @@
 /// Errors surfaced during startup or acquisition.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum AppError {
+    /// Command-line arguments do not select a supported startup mode.
+    #[error("{0}")]
+    Usage(String),
     /// Configuration read, validation or persistence failed.
     #[error(transparent)]
     Config(#[from] tiny_wb::config::ConfigError),
@@ -15,6 +18,14 @@ pub(crate) enum AppError {
     /// Filesystem or terminal I/O failed.
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
+    /// A requested scan CSV could not be opened or decoded.
+    #[error("cannot load CSV {}: {source}", path.display())]
+    Csv {
+        /// Requested input path.
+        path: std::path::PathBuf,
+        /// File or data error.
+        source: std::io::Error,
+    },
     /// Acquisition failed, potentially including a failed resume attempt.
     #[error(transparent)]
     Acquisition(#[from] tiny_wb::acquisition::AcquisitionError),

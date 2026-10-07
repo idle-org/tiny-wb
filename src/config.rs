@@ -163,6 +163,27 @@ pub struct UiConfig {
     pub chart_min_dbm: f64,
     /// Chart upper bound, in dBm.
     pub chart_max_dbm: f64,
+    /// Configurable keyboard shortcuts used by the completed-scan renderer.
+    pub bindings: PlotBindings,
+}
+
+/// Keyboard bindings for navigating a rendered frequency plot.
+///
+/// Each entry is either one Unicode character or one of `left`, `right`, and
+/// `home`. Bindings are case-sensitive for characters and must not overlap.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PlotBindings {
+    /// Keys that halve the visible frequency span.
+    pub zoom_in: Vec<String>,
+    /// Keys that double the visible frequency span.
+    pub zoom_out: Vec<String>,
+    /// Keys that move the viewport toward lower frequencies.
+    pub pan_left: Vec<String>,
+    /// Keys that move the viewport toward higher frequencies.
+    pub pan_right: Vec<String>,
+    /// Keys that restore the complete frequency range.
+    pub reset_view: Vec<String>,
 }
 
 /// CSV settings; paths are relative to the working directory unless absolute.
@@ -318,6 +339,31 @@ impl Config {
                 && self.ui.chart_min_dbm < self.ui.chart_max_dbm,
             "UI chart bounds must be finite and increasing",
         )?;
+        let binding_groups = [
+            &self.ui.bindings.zoom_in,
+            &self.ui.bindings.zoom_out,
+            &self.ui.bindings.pan_left,
+            &self.ui.bindings.pan_right,
+            &self.ui.bindings.reset_view,
+        ];
+        require(
+            binding_groups.iter().all(|group| !group.is_empty()),
+            "each UI plot action must have at least one binding",
+        )?;
+        let mut bindings: Vec<&str> = Vec::new();
+        for binding in binding_groups.into_iter().flatten() {
+            let valid = matches!(binding.as_str(), "left" | "right" | "home")
+                || (binding.chars().count() == 1 && !binding.chars().any(char::is_control));
+            require(
+                valid && binding != "q",
+                "UI plot bindings must be one printable character or left/right/home; q is reserved",
+            )?;
+            require(
+                !bindings.contains(&binding.as_str()),
+                "UI plot bindings must not overlap",
+            )?;
+            bindings.push(binding);
+        }
         require(!self.output.filename_prefix.is_empty() && self.output.filename_prefix.len() <= 64 && self.output.filename_prefix.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-'), "output.filename_prefix must contain 1–64 ASCII letters, digits, underscores or hyphens")?;
         require(
             !self.output.directory.as_os_str().is_empty()
@@ -412,6 +458,9 @@ mod tests {
             "[scan]\nfrequency_axis = 'unknown'",
             "[ui]\nchart_min_dbm = nan",
             "[ui]\nchart_min_dbm = 1.0",
+            "[ui.bindings]\nzoom_in = []",
+            "[ui.bindings]\nzoom_in = ['q']",
+            "[ui.bindings]\nzoom_in = ['left']",
             "[output]\nfilename_prefix = '../scan'",
             "[logging]\nfilter = ''",
             "[serial]\ntimeuot_ms = 5",

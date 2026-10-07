@@ -19,8 +19,8 @@ widgets, port discovery, worker threads, or the application's working directory.
 | `src/mock/` | Opt-in bounded device simulation and stream server. |
 | `examples/mock-tinysa-server.rs` | Portable TCP listener for the mock, outside release binaries. |
 | `src/acquisition.rs` | Command ordering, progress events, frame decoding and resume attempts. |
-| `src/export.rs` | CSV serialization to a writer and collision-safe file export. |
-| `src/main.rs` | Load configuration, start diagnostics, enumerate ports and manage terminal lifetime. |
+| `src/export.rs` | CSV parsing/serialization over I/O traits and collision-safe file export. |
+| `src/main.rs` | Select acquisition/direct-view mode, load configuration, start diagnostics, enumerate ports when needed and manage terminal lifetime. |
 | `src/error.rs` | Application/UI boundary errors with original context. |
 | `src/scan.rs` | Open the configured connection, adapt core events to shared progress, and export successful acquisitions. |
 | `src/ui/mod.rs` | Screen transitions, keyboard handling, worker startup and progress reconciliation. |
@@ -70,6 +70,7 @@ the original error's message instead of a second exhaustive mapping.
 SelectingConnection -> SelectingScan -> Scanning -> Complete -> exit
           |                  |             |
           +------------------+-------------+-> Error -> exit
+CSV file -------------------------------------> Complete
 ```
 
 The constructor takes configuration and enumerated ports as values, without
@@ -77,6 +78,10 @@ reading files. Selection is clamped before rendering, including empty lists.
 Before a scan starts, the controller validates the complete selected settings
 and request, atomically saves settings, then starts a worker. The controller
 reconciles worker status before drawing; rendering does not consume samples.
+The complete screen owns one named plot with an independent frequency viewport.
+Zooming and panning mutate only that viewport, not sample data. This plot
+boundary can grow into a tabbed collection without coupling CSV parsing or
+acquisition to Ratatui.
 
 The terminal guard restores terminal modes on ordinary returns and unwinding.
 Configuration, logging and enumeration errors occur before terminal takeover.

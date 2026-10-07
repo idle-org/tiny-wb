@@ -29,7 +29,10 @@ or inject your own adapter. Transport deadlines belong to the adapter; an
 arbitrary blocking `Read` implementation cannot be interrupted by the shell.
 `acquisition::acquire` accepts a validated Basic `ScanRequest`, scan/timing
 settings and a progress callback, and returns samples without opening files.
-`export::write_csv` writes those samples to any writer.
+`export::write_csv` writes those samples to any writer. `export::read_csv`
+loads the same two-column, optionally headed format from any `BufRead` source;
+it validates finite values and nondecreasing MHz frequencies without depending
+on the terminal renderer.
 
 ```rust
 use tiny_wb::{config::Config, connection::open_connection,

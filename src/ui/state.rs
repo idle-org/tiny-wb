@@ -49,8 +49,123 @@ pub(crate) struct App {
     pub(crate) config: Config,
     /// Explicit settings path selected at startup.
     pub(crate) config_path: PathBuf,
-    /// Completed samples owned by the UI, in MHz and dBm.
-    pub(crate) return_data: Vec<(f64, f64)>,
+    /// Plot currently shown by the renderer; a collection boundary for future tabs.
+    pub(crate) plot: Option<Plot>,
+}
+
+/// One named plot and its independently navigable frequency viewport.
+#[derive(Debug)]
+pub(crate) struct Plot {
+    /// User-facing source name.
+    pub(crate) label: String,
+    /// Samples in MHz and dBm, ordered by frequency.
+    pub(crate) data: Vec<(f64, f64)>,
+    /// Current and complete horizontal bounds.
+    pub(crate) viewport: FrequencyViewport,
+}
+
+impl Plot {
+    /// Construct a plot whose initial viewport contains all samples.
+    pub(crate) fn new(label: impl Into<String>, data: Vec<(f64, f64)>) -> Self {
+        let viewport = FrequencyViewport::from_samples(&data);
+        Self {
+            label: label.into(),
+            data,
+            viewport,
+        }
+    }
+}
+
+/// Horizontal chart bounds with zoom and pan clamped to the source data.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct FrequencyViewport {
+    /// Complete lower bound, in MHz.
+    full_min: f64,
+    /// Complete upper bound, in MHz.
+    full_max: f64,
+    /// Visible lower bound, in MHz.
+    visible_min: f64,
+    /// Visible upper bound, in MHz.
+    visible_max: f64,
+    /// Smallest permitted visible span.
+    min_span: f64,
+}
+
+impl FrequencyViewport {
+    /// Derive safe increasing chart bounds from an ordered sample set.
+    fn from_samples(samples: &[(f64, f64)]) -> Self {
+        let first = samples.first().map_or(0.0, |sample| sample.0);
+        let last = samples.last().map_or(first, |sample| sample.0);
+        let (full_min, full_max) = if first < last {
+            (first, last)
+        } else {
+            let padding = (first.abs() * 1e-6).max(0.001);
+            (first - padding, first + padding)
+        };
+        let span = full_max - full_min;
+        let sample_spacing = samples
+            .windows(2)
+            .filter_map(|pair| {
+                let spacing = pair[1].0 - pair[0].0;
+                (spacing > 0.0).then_some(spacing)
+            })
+            .min_by(f64::total_cmp);
+        Self {
+            full_min,
+            full_max,
+            visible_min: full_min,
+            visible_max: full_max,
+            min_span: sample_spacing.unwrap_or(span).min(span).max(f64::EPSILON),
+        }
+    }
+
+    /// Current `[minimum, maximum]` bounds in MHz.
+    pub(crate) fn bounds(self) -> [f64; 2] {
+        [self.visible_min, self.visible_max]
+    }
+
+    /// Halve the visible span around its center, down to the resolution floor.
+    pub(crate) fn zoom_in(&mut self) {
+        self.set_span(((self.visible_max - self.visible_min) / 2.0).max(self.min_span));
+    }
+
+    /// Double the visible span around its center, up to the complete range.
+    pub(crate) fn zoom_out(&mut self) {
+        self.set_span(((self.visible_max - self.visible_min) * 2.0).min(self.full_span()));
+    }
+
+    /// Move by one quarter of the visible span and clamp at the data edge.
+    pub(crate) fn pan(&mut self, direction: InputDirection) {
+        let span = self.visible_max - self.visible_min;
+        let shift = match direction {
+            InputDirection::Left => -span / 4.0,
+            InputDirection::Right => span / 4.0,
+            _ => return,
+        };
+        let new_min = (self.visible_min + shift).clamp(self.full_min, self.full_max - span);
+        self.visible_min = new_min;
+        self.visible_max = new_min + span;
+    }
+
+    /// Restore the complete source range.
+    pub(crate) fn reset(&mut self) {
+        self.visible_min = self.full_min;
+        self.visible_max = self.full_max;
+    }
+
+    /// Update the visible span while retaining the current center when possible.
+    fn set_span(&mut self, span: f64) {
+        let span = span.clamp(self.min_span, self.full_span());
+        let center = (self.visible_min + self.visible_max) / 2.0;
+        let new_min = (center - span / 2.0).clamp(self.full_min, self.full_max - span);
+        self.visible_min = new_min;
+        self.visible_max = new_min + span;
+    }
+
+    /// Width of the complete frequency range.
+    fn full_span(self) -> f64 {
+        self.full_max - self.full_min
+    }
 }
 
 #[derive(Debug)]
@@ -315,6 +430,53 @@ mod tests {
         let mut field = NumericInput::new(1, 10, 0, 100);
         field.change_value(InputDirection::Down);
         assert_eq!(field.value(), 0);
+    }
+
+    #[test]
+    fn viewport_zooms_pans_clamps_and_resets() {
+        let mut viewport = FrequencyViewport::from_samples(&[
+            (100.0, -1.0),
+            (125.0, -1.5),
+            (150.0, -2.0),
+            (175.0, -1.5),
+            (200.0, -1.0),
+        ]);
+        assert_eq!(viewport.bounds(), [100.0, 200.0]);
+        viewport.zoom_in();
+        assert_eq!(viewport.bounds(), [125.0, 175.0]);
+        viewport.pan(InputDirection::Right);
+        assert_eq!(viewport.bounds(), [137.5, 187.5]);
+        for _ in 0..20 {
+            viewport.pan(InputDirection::Right);
+        }
+        assert_eq!(viewport.bounds(), [150.0, 200.0]);
+        viewport.zoom_out();
+        assert_eq!(viewport.bounds(), [100.0, 200.0]);
+        viewport.reset();
+        assert_eq!(viewport.bounds(), [100.0, 200.0]);
+    }
+
+    #[test]
+    fn maximum_zoom_uses_the_finest_positive_sample_spacing() {
+        let mut viewport = FrequencyViewport::from_samples(&[
+            (100.0, -1.0),
+            (100.0, -2.0),
+            (100.01, -3.0),
+            (100.02, -4.0),
+            (200.0, -5.0),
+        ]);
+        for _ in 0..32 {
+            viewport.zoom_in();
+        }
+        let [minimum, maximum] = viewport.bounds();
+        assert!(((maximum - minimum) - 0.01).abs() < 1e-12);
+    }
+
+    #[test]
+    fn viewport_for_one_sample_still_has_increasing_bounds() {
+        let viewport = FrequencyViewport::from_samples(&[(240.0, -64.0)]);
+        let [minimum, maximum] = viewport.bounds();
+        assert!(minimum < 240.0 && maximum > 240.0);
     }
 
     #[test]

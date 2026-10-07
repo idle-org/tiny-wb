@@ -4,9 +4,84 @@ use crate::{config::OutputConfig, protocol::Sample};
 use chrono::Local;
 use std::{
     fs::{self, OpenOptions},
-    io::{self, BufWriter, Write},
+    io::{self, BufRead, BufWriter, Write},
     path::PathBuf,
 };
+
+/// Read samples from tiny-wb's two-column CSV representation.
+///
+/// Both headerless exports and files beginning with
+/// `frequency_MHz,level_dBm` are accepted. Blank lines are ignored. Every data
+/// row must contain exactly two finite numbers and frequencies must be in
+/// nondecreasing order. An empty file is rejected.
+///
+/// # Errors
+/// Returns [`io::ErrorKind::InvalidData`] with a line number for malformed CSV.
+pub fn read_csv(reader: impl BufRead) -> io::Result<Vec<Sample>> {
+    let mut samples = Vec::new();
+    let mut saw_header = false;
+    for (index, line) in reader.lines().enumerate() {
+        let line_number = index + 1;
+        let line = line?;
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if samples.is_empty() && !saw_header && line == "frequency_MHz,level_dBm" {
+            saw_header = true;
+            continue;
+        }
+        let mut columns = line.split(',');
+        let frequency = columns.next();
+        let level = columns.next();
+        if frequency.is_none() || level.is_none() || columns.next().is_some() {
+            return Err(invalid_csv(line_number, "expected exactly two columns"));
+        }
+        let parse = |value: &str, name: &str| {
+            value.trim().parse::<f64>().map_err(|_| {
+                invalid_csv(
+                    line_number,
+                    &format!("invalid {name} number `{}`", value.trim()),
+                )
+            })
+        };
+        let frequency_mhz = parse(frequency.unwrap_or_default(), "frequency")?;
+        let level_dbm = parse(level.unwrap_or_default(), "level")?;
+        if !frequency_mhz.is_finite() || !level_dbm.is_finite() {
+            return Err(invalid_csv(line_number, "values must be finite"));
+        }
+        if samples
+            .last()
+            .is_some_and(|sample: &Sample| sample.frequency_mhz > frequency_mhz)
+        {
+            return Err(invalid_csv(
+                line_number,
+                "frequencies must be in nondecreasing order",
+            ));
+        }
+        samples.push(Sample {
+            frequency_mhz,
+            level_dbm,
+        });
+    }
+    if samples.is_empty() {
+        return Err(invalid_csv(0, "file contains no samples"));
+    }
+    Ok(samples)
+}
+
+/// Build a bounded, contextual malformed-CSV error.
+fn invalid_csv(line: usize, message: &str) -> io::Error {
+    let location = if line == 0 {
+        String::new()
+    } else {
+        format!(" at line {line}")
+    };
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("invalid scan CSV{location}: {message}"),
+    )
+}
 
 /// Write sample values to any writer, optionally with an explicit units header.
 ///
@@ -93,6 +168,34 @@ mod tests {
             write_csv(Broken, &[], true).unwrap_err().kind(),
             io::ErrorKind::BrokenPipe
         );
+    }
+
+    #[test]
+    fn csv_reader_accepts_header_and_headerless_data() {
+        let expected = vec![Sample {
+            frequency_mhz: 240.5,
+            level_dbm: -64.25,
+        }];
+        assert_eq!(
+            read_csv(&b"frequency_MHz,level_dBm\n240.5,-64.25\n"[..]).unwrap(),
+            expected
+        );
+        assert_eq!(read_csv(&b"\n240.5, -64.25\n"[..]).unwrap(), expected);
+    }
+
+    #[test]
+    fn csv_reader_rejects_empty_malformed_and_unordered_data() {
+        for input in [
+            "",
+            "frequency_MHz,level_dBm\n",
+            "240\n",
+            "MHz,dBm\n",
+            "240,NaN\n",
+            "241,-1\n240,-2\n",
+        ] {
+            let error = read_csv(input.as_bytes()).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{input:?}");
+        }
     }
 
     #[test]

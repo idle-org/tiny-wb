@@ -26,8 +26,9 @@ model, range, or mode.
 ## Requirements
 
 - Rust 1.88.0 or newer
-- A powered tinySA Basic, Ultra, or Ultra+ and a data-capable USB cable
-- Permission to open the instrument's serial port
+- For acquisition, a powered tinySA Basic, Ultra, or Ultra+ and a data-capable
+  USB cable
+- For acquisition, permission to open the instrument's serial port
 
 Do not connect an unknown RF source directly to a tinySA. Use suitable external
 attenuation for transmitters and a DC block where a DC component may be present.
@@ -50,6 +51,18 @@ Use Left/Right or `h`/`l` to select a field, Up/Down or `k`/`j` to change it,
 Enter to advance, and `q` or Escape to quit. A successful scan displays a trace
 and writes a collision-safe `scan_*.csv` file in the current directory. CSV
 frequencies are in MHz and levels are in dBm.
+
+Open an existing tiny-wb CSV directly in the interactive renderer without
+enumerating or connecting to a device:
+
+```console
+cargo run --release -- --view scan.csv
+# The shorter `cargo run --release -- scan.csv` is equivalent.
+```
+
+On a plot, use `+`/`=` and `-` to zoom, Left/Right or `h`/`l` to pan, and
+`0` or Home to restore the full frequency range. Plot bindings are configurable
+under `[ui.bindings]`.
 
 ## Configuration and documentation
 

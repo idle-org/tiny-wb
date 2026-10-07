@@ -21,3 +21,24 @@ fn invalid_override_exits_without_entering_the_terminal() {
     assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
     fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn malformed_csv_exits_without_entering_the_terminal_or_enumerating_ports() {
+    let directory =
+        std::env::temp_dir().join(format!("tiny-wb-csv-startup-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("broken.csv");
+    fs::write(&path, "frequency_MHz,level_dBm\n240,not-a-level\n").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_tiny-wb"))
+        .current_dir(&directory)
+        .arg("--view")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    let error = String::from_utf8_lossy(&result.stderr);
+    assert!(error.contains("broken.csv"));
+    assert!(error.contains("line 2"));
+    assert!(!result.stdout.windows(2).any(|bytes| bytes == b"\x1b["));
+    fs::remove_dir_all(directory).unwrap();
+}
