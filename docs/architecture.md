@@ -84,7 +84,8 @@ boundary can grow into a tabbed collection without coupling CSV parsing or
 acquisition to Ratatui.
 
 The terminal guard restores terminal modes on ordinary returns and unwinding.
-Configuration, logging and enumeration errors occur before terminal takeover.
+Configuration and direct-view CSV errors occur before logger initialization;
+logging and enumeration errors occur before terminal takeover.
 Process termination or release-mode panic abort cannot be recovered by a guard.
 
 ## Acquisition and protocol boundary

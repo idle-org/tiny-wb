@@ -162,7 +162,7 @@ frequency-label convention explicitly after reviewing the
 [frequency assignment notes](usb-protocol.md#frequency-assignment).
 The direct renderer accepts this header or headerless files, ignores blank
 lines, and reports malformed, non-finite, empty, or decreasing-frequency data
-with its CSV line number before taking over the terminal.
+with its CSV line number before initializing logging or taking over the terminal.
 
 ### Logs
 

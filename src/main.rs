@@ -59,6 +59,25 @@ fn main() -> Result<(), AppError> {
         eprintln!("Cannot load {}: {error}", config_path.display());
         error
     })?;
+    let loaded_plot = if let StartMode::View(path) = &mode {
+        let file = File::open(path).map_err(|source| AppError::Csv {
+            path: path.clone(),
+            source,
+        })?;
+        let samples =
+            tiny_wb::export::read_csv(BufReader::new(file)).map_err(|source| AppError::Csv {
+                path: path.clone(),
+                source,
+            })?;
+        Some(
+            samples
+                .into_iter()
+                .map(|sample| (sample.frequency_mhz, sample.level_dbm))
+                .collect(),
+        )
+    } else {
+        None
+    };
     let _logger = Logger::try_with_str(&config.logging.filter)?
         .log_to_file(FileSpec::default().directory(&config.logging.directory))
         .write_mode(WriteMode::BufferAndFlush)
@@ -74,26 +93,11 @@ fn main() -> Result<(), AppError> {
             };
             ui::App::new(ports, config, config_path)
         }
-        StartMode::View(path) => {
-            let file = File::open(&path).map_err(|source| AppError::Csv {
-                path: path.clone(),
-                source,
-            })?;
-            let samples = tiny_wb::export::read_csv(BufReader::new(file)).map_err(|source| {
-                AppError::Csv {
-                    path: path.clone(),
-                    source,
-                }
-            })?;
-            ui::App::viewer(
-                config,
-                path,
-                samples
-                    .into_iter()
-                    .map(|sample| (sample.frequency_mhz, sample.level_dbm))
-                    .collect(),
-            )
-        }
+        StartMode::View(path) => ui::App::viewer(
+            config,
+            path,
+            loaded_plot.expect("viewer data was loaded for view mode"),
+        ),
         StartMode::Help => unreachable!("help returned before configuration loading"),
     };
     let _session = TerminalSession;
