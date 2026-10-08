@@ -68,9 +68,11 @@ the original error's message instead of a second exhaustive mapping.
 
 ```text
 SelectingConnection -> SelectingScan -> Scanning -> Complete -> exit
+                           ^             |   |
+                           +---- n -------+   +-- r --> Scanning
           |                  |             |
           +------------------+-------------+-> Error -> exit
-CSV file -------------------------------------> Complete
+CSV file -------------------------------------> Complete -> exit
 ```
 
 The constructor takes configuration and enumerated ports as values, without
@@ -79,6 +81,8 @@ Before a scan starts, the controller validates the complete selected settings
 and request, atomically saves settings, then starts a worker. The controller
 reconciles worker status before drawing; rendering does not consume samples.
 The complete screen owns one named plot with an independent frequency viewport.
+An acquired result can repeat its retained request/settings or return to the
+prefilled scan editor; a standalone CSV remains view-only.
 Zooming and panning mutate only that viewport, not sample data. This plot
 boundary can grow into a tabbed collection without coupling CSV parsing or
 acquisition to Ratatui.

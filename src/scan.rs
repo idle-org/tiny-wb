@@ -72,6 +72,16 @@ impl ScanState {
         }
     }
 
+    /// Clear results and errors before launching another worker.
+    pub(crate) fn begin(&self) {
+        let mut progress = self.lock();
+        *progress = Progress {
+            status: ScanStatus::Running,
+            message: "Opening connection".into(),
+            ..Progress::default()
+        };
+    }
+
     /// Current completion estimate; 100 means acquisition and export succeeded.
     pub(crate) fn progress(&self) -> usize {
         self.lock().percent
@@ -121,11 +131,7 @@ pub(crate) fn run_scan(
     request: ScanRequest,
     config: Config,
 ) -> Result<(), AppError> {
-    {
-        let mut progress = state.lock();
-        progress.status = ScanStatus::Running;
-        progress.message = "Opening connection".into();
-    }
+    state.begin();
     config.validate()?;
     request
         .validate()
@@ -173,6 +179,22 @@ mod tests {
         let state = ScanState::default();
         state.lock().samples = Some(vec![(240.0, -64.0)]);
         assert_eq!(state.take_samples().unwrap(), vec![(240.0, -64.0)]);
+        assert!(state.take_samples().is_err());
+    }
+
+    #[test]
+    fn beginning_another_scan_clears_previous_results_and_errors() {
+        let state = ScanState::default();
+        state.complete(PathBuf::from("old.csv"), vec![(240.0, -64.0)]);
+        state.fail("old failure");
+
+        state.begin();
+
+        assert_eq!(state.status(), ScanStatus::Running);
+        assert_eq!(state.progress(), 0);
+        assert_eq!(state.message(), "Opening connection");
+        assert!(state.info().is_empty());
+        assert!(state.error().is_none());
         assert!(state.take_samples().is_err());
     }
 }

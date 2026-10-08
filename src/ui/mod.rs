@@ -54,6 +54,8 @@ impl App {
             repeat: NumericInput::new(config.repeat, 1, 1, config.scan.max_repeat),
             scan_state: ScanState::default(),
             plot: None,
+            last_scan: None,
+            can_acquire: true,
             config,
             config_path,
         }
@@ -64,6 +66,7 @@ impl App {
         let mut app = Self::new(Vec::new(), config, PathBuf::new());
         app.flow_state = AppState::Complete;
         app.plot = Some(Plot::new(source.display().to_string(), data));
+        app.can_acquire = false;
         app
     }
 
@@ -150,6 +153,9 @@ impl App {
         if matches!(self.flow_state, AppState::Complete) {
             return self.handle_plot_key(key.code);
         }
+        if self.handle_numeric_editor_key(key.code) {
+            return Ok(());
+        }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             KeyCode::Char('j') | KeyCode::Down => self.change_cursor_position(InputDirection::Down),
@@ -165,11 +171,53 @@ impl App {
         Ok(())
     }
 
+    /// Give an active direct-entry editor exclusive use of keys and start one on a digit.
+    fn handle_numeric_editor_key(&mut self, code: KeyCode) -> bool {
+        let input = match self.flow_state {
+            AppState::SelectingScan(SelectedScan::StartFreq) => &mut self.start_frequency,
+            AppState::SelectingScan(SelectedScan::FinalFreq) => &mut self.stop_frequency,
+            AppState::SelectingScan(SelectedScan::Points) => &mut self.points,
+            _ => return false,
+        };
+        if input.is_editing() {
+            match code {
+                KeyCode::Char(digit) if digit.is_ascii_digit() => input.push_digit(digit),
+                KeyCode::Backspace => input.backspace(),
+                KeyCode::Enter => {
+                    input.commit_edit();
+                }
+                KeyCode::Esc => input.cancel_edit(),
+                _ => {}
+            }
+            true
+        } else {
+            match code {
+                KeyCode::Char(digit) if digit.is_ascii_digit() => {
+                    input.push_digit(digit);
+                    true
+                }
+                _ => false,
+            }
+        }
+    }
+
     /// Apply configured navigation keys on the plot screen.
     fn handle_plot_key(&mut self, code: KeyCode) -> Result<(), UiError> {
-        if matches!(code, KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter) {
-            self.should_quit = true;
-            return Ok(());
+        match code {
+            KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter => {
+                self.should_quit = true;
+                return Ok(());
+            }
+            KeyCode::Char('r') if self.can_acquire => {
+                self.repeat_last_scan()?;
+                return Ok(());
+            }
+            KeyCode::Char('n') if self.can_acquire => {
+                self.plot = None;
+                self.flow_state = AppState::SelectingScan(SelectedScan::default());
+                return Ok(());
+            }
+            _ => {}
         }
         let bindings = &self.config.ui.bindings;
         let action = if binding_matches(&code, &bindings.zoom_in) {
@@ -268,26 +316,7 @@ impl App {
                 self.flow_state = AppState::SelectingScan(SelectedScan::default());
             }
             AppState::SelectingScan(_) => {
-                let config = self.selected_config()?;
-                let request = ScanRequest {
-                    start_hz: config.start_frequency as u64 * 1_000_000,
-                    stop_hz: config.stop_frequency as u64 * 1_000_000,
-                    points: config.points,
-                    repeat: config.repeat,
-                };
-                request
-                    .validate()
-                    .map_err(tiny_wb::acquisition::AcquisitionError::from)
-                    .map_err(AppError::from)?;
-                config.save(&self.config_path).map_err(AppError::from)?;
-                self.flow_state = AppState::Scanning;
-                self.init_progress()?;
-                let connection = self.scan_state.clone();
-                thread::spawn(move || {
-                    if let Err(error) = scan::run_scan(connection.clone(), request, config) {
-                        connection.fail(error);
-                    }
-                });
+                self.start_selected_scan()?;
             }
             AppState::Complete => {
                 self.should_quit = true;
@@ -297,6 +326,47 @@ impl App {
                 self.should_quit = true;
             }
         }
+        Ok(())
+    }
+
+    /// Validate and persist the edited fields, then launch their scan.
+    fn start_selected_scan(&mut self) -> Result<(), UiError> {
+        let config = self.selected_config()?;
+        let request = ScanRequest {
+            start_hz: config.start_frequency as u64 * 1_000_000,
+            stop_hz: config.stop_frequency as u64 * 1_000_000,
+            points: config.points,
+            repeat: config.repeat,
+        };
+        request
+            .validate()
+            .map_err(tiny_wb::acquisition::AcquisitionError::from)
+            .map_err(AppError::from)?;
+        config.save(&self.config_path).map_err(AppError::from)?;
+        self.launch_scan(request, config)
+    }
+
+    /// Relaunch the exact request and settings used by the previous scan.
+    fn repeat_last_scan(&mut self) -> Result<(), UiError> {
+        let Some((request, config)) = self.last_scan.clone() else {
+            return Ok(());
+        };
+        self.launch_scan(request, config)
+    }
+
+    /// Reset progress synchronously and start one acquisition worker.
+    fn launch_scan(&mut self, request: ScanRequest, config: Config) -> Result<(), UiError> {
+        self.init_progress()?;
+        self.scan_state.begin();
+        self.flow_state = AppState::Scanning;
+        self.plot = None;
+        self.last_scan = Some((request, config.clone()));
+        let connection = self.scan_state.clone();
+        thread::spawn(move || {
+            if let Err(error) = scan::run_scan(connection.clone(), request, config) {
+                connection.fail(error);
+            }
+        });
         Ok(())
     }
     /// Transfer completed samples once and keep rendering free of transitions.
@@ -391,6 +461,69 @@ mod tests {
     }
 
     #[test]
+    fn frequency_digits_open_an_editor_before_enter_advances() {
+        let mut app = app();
+        app.init_config().unwrap();
+        app.next_step().unwrap();
+        for digit in "315".chars() {
+            app.handle_start_keys(KeyEvent::new(KeyCode::Char(digit), KeyModifiers::NONE))
+                .unwrap();
+        }
+        assert_eq!(app.start_frequency.to_string(), "315_");
+        app.handle_start_keys(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+            .unwrap();
+        assert!(matches!(
+            app.flow_state,
+            AppState::SelectingScan(SelectedScan::StartFreq)
+        ));
+        app.handle_start_keys(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.start_frequency.value(), 315);
+        assert!(matches!(
+            app.flow_state,
+            AppState::SelectingScan(SelectedScan::StartFreq)
+        ));
+        app.handle_start_keys(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+            .unwrap();
+        assert!(matches!(
+            app.flow_state,
+            AppState::SelectingScan(SelectedScan::FinalFreq)
+        ));
+        app.handle_start_keys(KeyEvent::new(KeyCode::Char('9'), KeyModifiers::NONE))
+            .unwrap();
+        app.handle_start_keys(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.stop_frequency.value(), 800);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn point_digits_use_the_same_bounded_editor() {
+        let mut app = app();
+        app.init_config().unwrap();
+        app.next_step().unwrap();
+        app.next_menu(InputDirection::Right).unwrap();
+        app.next_menu(InputDirection::Right).unwrap();
+        assert!(matches!(
+            app.flow_state,
+            AppState::SelectingScan(SelectedScan::Points)
+        ));
+
+        for digit in "2048".chars() {
+            app.handle_start_keys(KeyEvent::new(KeyCode::Char(digit), KeyModifiers::NONE))
+                .unwrap();
+        }
+        assert_eq!(app.points.to_string(), "2048_");
+        app.handle_start_keys(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.points.value(), 2048);
+        assert!(matches!(
+            app.flow_state,
+            AppState::SelectingScan(SelectedScan::Points)
+        ));
+    }
+
+    #[test]
     fn missing_ports_and_invalid_spans_fail_before_saving_or_scanning() {
         let mut app = App::new(
             Vec::new(),
@@ -448,6 +581,31 @@ mod tests {
         app.handle_start_keys(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE))
             .unwrap();
         assert_eq!(app.plot.as_ref().unwrap().viewport.bounds(), [100.0, 200.0]);
+    }
+
+    #[test]
+    fn new_scan_key_returns_to_prefilled_parameters_only_for_acquisition() {
+        let mut app = app();
+        app.flow_state = AppState::Complete;
+        app.plot = Some(Plot::new("scan.csv", vec![(240.0, -64.0)]));
+        app.handle_start_keys(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(matches!(
+            app.flow_state,
+            AppState::SelectingScan(SelectedScan::StartFreq)
+        ));
+        assert_eq!(app.start_frequency.value(), 240);
+        assert!(app.plot.is_none());
+
+        let mut viewer = App::viewer(
+            Config::default(),
+            PathBuf::from("scan.csv"),
+            vec![(240.0, -64.0)],
+        );
+        viewer
+            .handle_start_keys(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(matches!(viewer.flow_state, AppState::Complete));
     }
 
     #[test]

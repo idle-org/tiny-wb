@@ -13,7 +13,7 @@ use crate::{
     error::{AppError, UiError},
     scan::ScanState,
 };
-use tiny_wb::config::Config;
+use tiny_wb::{config::Config, protocol::ScanRequest};
 
 /// Color of a selected border
 pub(crate) const SELECTED_COLOR: Color = Color::White;
@@ -49,6 +49,10 @@ pub(crate) struct App {
     pub(crate) config: Config,
     /// Explicit settings path selected at startup.
     pub(crate) config_path: PathBuf,
+    /// Last launched request and settings, retained for one-key repetition.
+    pub(crate) last_scan: Option<(ScanRequest, Config)>,
+    /// Whether this session may acquire, as opposed to viewing a standalone CSV.
+    pub(crate) can_acquire: bool,
     /// Plot currently shown by the renderer; a collection boundary for future tabs.
     pub(crate) plot: Option<Plot>,
 }
@@ -179,6 +183,10 @@ pub(crate) struct NumericInput {
     min_clamp: usize,
     /// Inclusive upper bound.
     max_clamp: usize,
+    /// Digits being entered directly; `None` retains step-based behavior.
+    edit_buffer: Option<String>,
+    /// Whether the current buffer failed bounds or integer validation.
+    invalid_edit: bool,
 }
 
 impl NumericInput {
@@ -208,12 +216,65 @@ impl NumericInput {
             increment,
             max_clamp,
             min_clamp,
+            edit_buffer: None,
+            invalid_edit: false,
         }
     }
 
     /// Read the current value.
     pub(crate) fn value(&self) -> usize {
         self.value
+    }
+
+    /// Start or extend direct decimal entry without changing the committed value.
+    pub(crate) fn push_digit(&mut self, digit: char) {
+        if !digit.is_ascii_digit() {
+            return;
+        }
+        let buffer = self.edit_buffer.get_or_insert_with(String::new);
+        if buffer.len() < 20 {
+            buffer.push(digit);
+        }
+        self.invalid_edit = false;
+    }
+
+    /// Remove the last typed digit while retaining edit mode.
+    pub(crate) fn backspace(&mut self) {
+        if let Some(buffer) = self.edit_buffer.as_mut() {
+            buffer.pop();
+            self.invalid_edit = false;
+        }
+    }
+
+    /// Commit direct entry when it is an integer inside the field's bounds.
+    pub(crate) fn commit_edit(&mut self) -> bool {
+        let parsed = self
+            .edit_buffer
+            .as_deref()
+            .filter(|buffer| !buffer.is_empty())
+            .and_then(|buffer| buffer.parse::<usize>().ok());
+        if let Some(value) =
+            parsed.filter(|value| (self.min_clamp..=self.max_clamp).contains(value))
+        {
+            self.value = value;
+            self.edit_buffer = None;
+            self.invalid_edit = false;
+            true
+        } else {
+            self.invalid_edit = true;
+            false
+        }
+    }
+
+    /// Abandon direct entry and restore the previously committed value.
+    pub(crate) fn cancel_edit(&mut self) {
+        self.edit_buffer = None;
+        self.invalid_edit = false;
+    }
+
+    /// Whether keystrokes currently belong to the inline editor.
+    pub(crate) fn is_editing(&self) -> bool {
+        self.edit_buffer.is_some()
     }
 }
 
@@ -408,7 +469,21 @@ pub(crate) enum InputDirection {
 
 impl std::fmt::Display for NumericInput {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.value.fmt(formatter)
+        if let Some(buffer) = &self.edit_buffer {
+            if self.invalid_edit {
+                write!(
+                    formatter,
+                    "{}_ (enter {}–{})",
+                    buffer, self.min_clamp, self.max_clamp
+                )
+            } else if buffer.is_empty() {
+                formatter.write_str("_")
+            } else {
+                write!(formatter, "{buffer}_")
+            }
+        } else {
+            self.value.fmt(formatter)
+        }
     }
 }
 
@@ -430,6 +505,28 @@ mod tests {
         let mut field = NumericInput::new(1, 10, 0, 100);
         field.change_value(InputDirection::Down);
         assert_eq!(field.value(), 0);
+    }
+
+    #[test]
+    fn numeric_input_edits_commits_and_cancels_typed_values() {
+        let mut field = NumericInput::new(240, 10, 0, 5_400);
+        for digit in "1234".chars() {
+            field.push_digit(digit);
+        }
+        assert!(field.is_editing());
+        assert_eq!(field.to_string(), "1234_");
+        assert!(field.commit_edit());
+        assert_eq!(field.value(), 1234);
+
+        for digit in "9999".chars() {
+            field.push_digit(digit);
+        }
+        assert!(!field.commit_edit());
+        assert_eq!(field.value(), 1234);
+        assert!(field.to_string().contains("enter 0–5400"));
+        field.backspace();
+        field.cancel_edit();
+        assert_eq!(field.to_string(), "1234");
     }
 
     #[test]

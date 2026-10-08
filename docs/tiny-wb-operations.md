@@ -102,7 +102,18 @@ configurable; Basic frequency limits remain fixed protocol rules.
 | Repeat | measurements/point | 1 | 1 | 1–1,000 |
 
 Left/right or `h`/`l` changes the selected field. Up/down or `k`/`j` changes
-the selection/value. Enter advances to the next screen. `q` or Escape exits.
+the selection/value. On either frequency field or the Points field, typing a
+digit opens an inline editor: digits append, Backspace removes a digit, Enter
+applies a value within the displayed bounds, and Escape cancels the edit.
+Frequencies are entered in MHz; points are entered as a sample count. Applying
+a typed value does not advance, so press Enter again to start the scan. Outside
+the editor, Enter advances to the next screen and `q` or Escape exits.
+
+Instrument identification sends the read-only `version` and `info` queries. If
+the first complete pair is empty or cannot identify a supported family, tiny-wb
+repeats that pair once before reporting the identification error. Transport
+timeouts and incomplete prompts are not replayed on a potentially unsynchronized
+stream.
 
 Large point and repeat values can produce extremely long scans. Total time also
 depends on RBW and instrument mode; the progress bar is based mainly on bytes
@@ -121,8 +132,13 @@ Left/Right or `h`/`l` pans by a quarter of the visible span, and `0` or Home
 restores the full range. Zoom and pan stay within the frequencies present in
 the plot. Maximum zoom follows the finest positive sample spacing in the loaded
 data, and frequency labels add decimal places as the visible range narrows.
-These bindings are configurable under `[ui.bindings]`; `q`, Escape, or Enter
-exits the renderer.
+After an acquired scan, `r` reconnects and repeats the exact request and settings
+without reopening the parameter screen; each successful repeat creates a new
+collision-safe CSV. `n` returns to the scan screen with the previous parameters
+prefilled so they can be edited before starting another scan. These restart keys
+are not available when viewing a CSV directly. Plot bindings are configurable
+under `[ui.bindings]`; on acquired results, `r` and `n` take precedence over any
+matching plot binding. `q`, Escape, or Enter exits the renderer.
 
 ## Files
 

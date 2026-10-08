@@ -114,12 +114,7 @@ pub fn acquire<T: Read + Write>(
     report(ScanEvent::Message("Identifying instrument"));
     report(ScanEvent::Progress(5));
     shell.synchronize()?;
-    let version = shell.command("version", delay, settle)?;
-    let info = shell.command("info", delay, settle)?;
-    if version.trim().is_empty() || info.trim().is_empty() {
-        return Err(AcquisitionError::MissingIdentity);
-    }
-    let identity = DeviceIdentity::detect(version, info)?;
+    let identity = identify_with_retry(shell, delay, settle, &mut report)?;
     let expected = match scan.device_model {
         ModelSelection::Auto => None,
         ModelSelection::Basic => Some(DeviceModel::Basic),
@@ -243,6 +238,37 @@ pub fn acquire<T: Read + Write>(
     }
 }
 
+/// Retry the read-only identity exchange once after a complete but unusable reply.
+///
+/// Transport failures are not retried because a timeout can leave an incomplete
+/// prompt in the buffered stream. Replaying commands in that state would risk
+/// assigning a late response to the wrong request.
+fn identify_with_retry<T: Read + Write>(
+    shell: &mut Shell<T>,
+    delay: Duration,
+    settle: Duration,
+    report: &mut impl FnMut(ScanEvent),
+) -> Result<DeviceIdentity, AcquisitionError> {
+    for attempt in 0..2 {
+        let version = shell.command("version", delay, settle)?;
+        let info = shell.command("info", delay, settle)?;
+        let identity = if version.trim().is_empty() || info.trim().is_empty() {
+            Err(AcquisitionError::MissingIdentity)
+        } else {
+            DeviceIdentity::detect(version, info).map_err(AcquisitionError::from)
+        };
+        match identity {
+            Ok(identity) => return Ok(identity),
+            Err(error) if attempt == 0 => {
+                log::warn!("instrument identification failed; retrying once: {error}");
+                report(ScanEvent::Message("Retrying instrument identification"));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the bounded identity loop always returns")
+}
+
 fn advertises_command(help: &str, command: &str) -> bool {
     help.split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
         .any(|word| word.eq_ignore_ascii_case(command))
@@ -363,6 +389,49 @@ mod tests {
     }
 
     #[test]
+    fn identification_retries_once_after_an_unusable_version() {
+        let mut config = Config::default();
+        config.scan.legacy_pre_scan = false;
+        config.serial.command_delay_ms = 0;
+        config.serial.settle_delay_ms = 0;
+        let request = ScanRequest {
+            start_hz: 240_000_000,
+            stop_hz: 960_000_000,
+            points: 2,
+            repeat: 1,
+        };
+        let mut input = b"ch>\r\nch>unknown\r\nch>tinySA_v1.4-test\r\nch>tinySA\r\nch>Commands: repeat zero pause mode sweep scanraw resume\r\nch>"
+            .to_vec();
+        input.extend_from_slice(b"okch>".repeat(2).as_slice());
+        input.extend_from_slice(b"128dBm\r\nch>");
+        input.extend_from_slice(b"okch>".repeat(5).as_slice());
+        input.extend_from_slice(b"{x\0\x08x\0\x10}ch>okch>");
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let mut shell = Shell::new(
+            Transcript {
+                input: Cursor::new(input),
+                commands: commands.clone(),
+            },
+            1024,
+        );
+        let mut events = Vec::new();
+
+        let result = acquire(
+            &mut shell,
+            &request,
+            &config.scan,
+            &config.serial,
+            |event| events.push(event),
+        );
+
+        assert!(result.is_ok(), "{result:?}");
+        let written = String::from_utf8(commands.lock().unwrap().clone()).unwrap();
+        assert!(written.starts_with("version\rinfo\rversion\rinfo\rhelp\r"));
+        assert_eq!(written.matches("version\r").count(), 2);
+        assert!(events.contains(&ScanEvent::Message("Retrying instrument identification")));
+    }
+
+    #[test]
     fn malformed_frames_still_resume_and_preserve_original_error() {
         let (result, commands, _) = exercise(b"{y\0\x08x\0\x10}", true, true);
         assert!(matches!(
@@ -426,7 +495,14 @@ mod tests {
             )
             .unwrap();
             let commands = Arc::new(Mutex::new(Vec::new()));
-            let input = format!("ch>{version}\r\nch>{info}\r\nch>{help}\r\nch>ch>ch>{zero}\r\nch>");
+            let retry_identity = if matches!(expected, "unsupported device" | "conflicting") {
+                format!("{version}\r\nch>{info}\r\nch>")
+            } else {
+                String::new()
+            };
+            let input = format!(
+                "ch>{version}\r\nch>{info}\r\nch>{retry_identity}{help}\r\nch>ch>ch>{zero}\r\nch>"
+            );
             let mut shell = Shell::new(
                 Transcript {
                     input: Cursor::new(input.into_bytes()),

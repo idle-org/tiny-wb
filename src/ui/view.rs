@@ -113,13 +113,21 @@ impl App {
     }
     /// Show keyboard guidance below editable settings.
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        frame.render_widget(
-            Paragraph::new(
-                "Use ↓↑ to move, ←→ to change status widget and ↲ to validate configuration.",
-            )
-            .centered(),
-            area,
-        );
+        let guidance = match self.flow_state {
+            AppState::SelectingScan(SelectedScan::StartFreq | SelectedScan::FinalFreq)
+                if self.start_frequency.is_editing() || self.stop_frequency.is_editing() =>
+            {
+                "Type MHz; Backspace deletes, ↲ applies, and Esc cancels."
+            }
+            AppState::SelectingScan(SelectedScan::Points) if self.points.is_editing() => {
+                "Type the point count; Backspace deletes, ↲ applies, and Esc cancels."
+            }
+            AppState::SelectingScan(_) => {
+                "Use ↓↑ to change, ←→ to select, digits to type MHz/points, and ↲ to continue."
+            }
+            _ => "Use ↓↑ to move, ←→ to select, and ↲ to continue.",
+        };
+        frame.render_widget(Paragraph::new(guidance).centered(), area);
     }
 
     /// Render the available ports and configured baud choices.
@@ -320,13 +328,19 @@ impl App {
             );
         frame.render_widget(chart, graph_area);
         let keys = &self.config.ui.bindings;
+        let restart = if self.can_acquire {
+            "; r repeats; n edits a new scan"
+        } else {
+            ""
+        };
         let footer = Paragraph::new(format!(
-            "zoom {} / {}; pan {} / {}; reset {}; q exits",
+            "zoom {} / {}; pan {} / {}; reset {}{}; q exits",
             keys.zoom_in.join("|"),
             keys.zoom_out.join("|"),
             keys.pan_left.join("|"),
             keys.pan_right.join("|"),
             keys.reset_view.join("|"),
+            restart,
         ))
         .centered();
         frame.render_widget(status, title_area);

@@ -48,7 +48,11 @@ a COM port. If the port cannot be opened, follow the
 [serial-permission guidance](docs/tiny-wb-operations.md#serial-permissions).
 
 Use Left/Right or `h`/`l` to select a field, Up/Down or `k`/`j` to change it,
-Enter to advance, and `q` or Escape to quit. A successful scan displays a trace
+or type digits to edit a selected start/stop frequency in MHz or the point count.
+Enter applies a typed value (press it again to advance), Backspace removes a
+digit, and Escape cancels an active edit. Otherwise Enter advances and `q` or
+Escape quits.
+A successful scan displays a trace
 and writes a collision-safe `scan_*.csv` file in the current directory. CSV
 frequencies are in MHz and levels are in dBm.
 
@@ -62,7 +66,8 @@ cargo run --release -- --view scan.csv
 
 On a plot, use `+`/`=` and `-` to zoom, Left/Right or `h`/`l` to pan, and
 `0` or Home to restore the full frequency range. Plot bindings are configurable
-under `[ui.bindings]`.
+under `[ui.bindings]`. After an acquired scan, `r` immediately repeats the same
+scan and `n` returns to the prefilled scan-parameter editor.
 
 ## Configuration and documentation
 
