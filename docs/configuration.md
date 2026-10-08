@@ -81,10 +81,10 @@ files that explicitly contain `frequency_axis = "inclusive"` keep their old
 labels; partial configurations that omit the key adopt the corrected default.
 See [frequency assignment](usb-protocol.md#frequency-assignment).
 
-`[ui.bindings]` configures the result/CSV renderer. Each action is a nonempty
-array of unique bindings. A binding is one printable character or `left`,
-`right`, or `home`; bindings cannot overlap between actions and `q` remains
-reserved for exit. The defaults are:
+`[ui.bindings]` configures completed, CSV, and live plot navigation. Each action
+is a nonempty array of unique bindings. A binding is one printable character or
+`left`, `right`, or `home`; bindings cannot overlap between actions and `q`
+remains reserved for exit. The defaults are:
 
 ```toml
 [ui.bindings]

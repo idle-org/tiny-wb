@@ -1,14 +1,14 @@
 //! Ratatui rendering; acquisition results arrive through shared scan state.
 
 use super::state::{
-    App, AppState, SelectedConnection, SelectedScan, SELECTED_COLOR, UNSELECTED_COLOR,
+    App, AppState, Plot, SelectedConnection, SelectedScan, SELECTED_COLOR, UNSELECTED_COLOR,
 };
 use crate::error::UiError;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Style},
     symbols::Marker,
-    widgets::{Axis, Block, Chart, Dataset, GraphType, List, Paragraph, Wrap},
+    widgets::{Axis, Block, Chart, Clear, Dataset, GraphType, List, Paragraph, Wrap},
     Frame,
 };
 
@@ -76,6 +76,9 @@ impl App {
                     .bounds([self.config.ui.chart_min_dbm, self.config.ui.chart_max_dbm]),
             );
             frame.render_widget(chart, graph_area);
+            if self.show_peak_info {
+                render_peak_info(frame, graph_area, plot);
+            }
         } else {
             frame.render_widget(
                 Paragraph::new("Waiting for the first complete sweep…")
@@ -86,7 +89,7 @@ impl App {
         }
         frame.render_widget(
             Paragraph::new(
-                "1 avg4 · 2 avg16 · 3 max hold · 4 max decay · 5 min hold · 6 min decay · s save · q stop+save",
+                "1–6 trace · zoom +/= / - · pan ←/→ · 0 reset · m peak · s save · q stop+save",
             )
             .centered()
             .wrap(Wrap { trim: true }),
@@ -398,6 +401,9 @@ impl App {
                     ]),
             );
         frame.render_widget(chart, graph_area);
+        if self.show_peak_info {
+            render_peak_info(frame, graph_area, plot);
+        }
         let keys = &self.config.ui.bindings;
         let restart = if self.can_acquire {
             "; r repeats; n edits a new scan"
@@ -405,7 +411,7 @@ impl App {
             ""
         };
         let footer = Paragraph::new(format!(
-            "zoom {} / {}; pan {} / {}; reset {}{}; q exits",
+            "zoom {} / {}; pan {} / {}; reset {}; m peak{}; q exits",
             keys.zoom_in.join("|"),
             keys.zoom_out.join("|"),
             keys.pan_left.join("|"),
@@ -418,6 +424,31 @@ impl App {
         frame.render_widget(footer, footer_area);
         Ok(())
     }
+}
+
+/// Overlay the maximum visible sample without changing the chart's data bounds.
+fn render_peak_info(frame: &mut Frame<'_>, graph_area: Rect, plot: &Plot) {
+    let Some((frequency, level)) = plot.visible_peak() else {
+        return;
+    };
+    let width = graph_area.width.min(26);
+    let height = graph_area.height.min(4);
+    if width == 0 || height == 0 {
+        return;
+    }
+    let area = Rect::new(
+        graph_area.right().saturating_sub(width),
+        graph_area.y,
+        width,
+        height,
+    );
+    let span = plot.viewport.bounds()[1] - plot.viewport.bounds()[0];
+    let text = format!("{level:.2} dBm\n{} MHz", format_frequency(frequency, span));
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(text).block(Block::bordered().title("Visible peak")),
+        area,
+    );
 }
 
 /// Keep axis labels compact while retaining useful precision after zooming.

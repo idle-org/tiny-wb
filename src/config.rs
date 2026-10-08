@@ -163,7 +163,7 @@ pub struct UiConfig {
     pub chart_min_dbm: f64,
     /// Chart upper bound, in dBm.
     pub chart_max_dbm: f64,
-    /// Configurable keyboard shortcuts used by the completed-scan renderer.
+    /// Configurable keyboard shortcuts used by completed, CSV, and live plots.
     pub bindings: PlotBindings,
 }
 

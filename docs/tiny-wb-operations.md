@@ -140,11 +140,13 @@ scatter trace. Its Y axis defaults to −128–0 dBm and uses the configured `ui
 and `ui.chart_max_dbm` bounds. Values outside those bounds are clipped visually
 even though CSV data may contain them.
 
-The frequency axis is labeled in MHz. `+` or `=` zooms in, `-` zooms out,
-Left/Right or `h`/`l` pans by a quarter of the visible span, and `0` or Home
-restores the full range. Zoom and pan stay within the frequencies present in
-the plot. Maximum zoom follows the finest positive sample spacing in the loaded
-data, and frequency labels add decimal places as the visible range narrows.
+The frequency axis is labeled in MHz. In completed plots and live mode, `+` or
+`=` zooms in, `-` zooms out, Left/Right or `h`/`l` pans by a quarter of the
+visible span, and `0` or Home restores the full range. Zoom and pan stay within
+the frequencies present in the plot. Maximum zoom follows the finest positive
+sample spacing in the loaded data, and frequency labels add decimal places as
+the visible range narrows. `m` toggles a top-right box containing the level and
+frequency of the strongest sample in the visible range.
 After an acquired scan, `r` reconnects and repeats the exact request and settings
 without reopening the parameter screen; each successful repeat creates a new
 collision-safe CSV. `n` returns to the scan screen with the previous parameters

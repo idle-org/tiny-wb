@@ -70,7 +70,9 @@ cargo run --release -- --view scan.csv
 ```
 
 On a plot, use `+`/`=` and `-` to zoom, Left/Right or `h`/`l` to pan, and
-`0` or Home to restore the full frequency range. Plot bindings are configurable
+`0` or Home to restore the full frequency range. These controls also work during
+live capture. Press `m` to toggle a box showing the strongest visible sample's
+level and frequency. Plot bindings are configurable
 under `[ui.bindings]`. After an acquired scan, `r` immediately repeats the same
 scan and `n` returns to the prefilled scan-parameter editor.
 

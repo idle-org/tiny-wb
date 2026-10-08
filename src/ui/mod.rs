@@ -57,6 +57,7 @@ impl App {
             live_enabled: false,
             live_generation: 0,
             live_exit_requested: false,
+            show_peak_info: false,
             plot: None,
             last_scan: None,
             can_acquire: true,
@@ -197,9 +198,13 @@ impl App {
             KeyCode::Char(key) => {
                 if let Some(mode) = TraceMode::from_key(key) {
                     self.live_state.set_mode(mode);
+                } else if !self.apply_plot_navigation(&code) && key == 'm' {
+                    self.show_peak_info = !self.show_peak_info;
                 }
             }
-            _ => {}
+            _ => {
+                self.apply_plot_navigation(&code);
+            }
         }
         Ok(())
     }
@@ -252,21 +257,32 @@ impl App {
             }
             _ => {}
         }
+        if !self.apply_plot_navigation(&code) && code == KeyCode::Char('m') {
+            self.show_peak_info = !self.show_peak_info;
+        }
+        Ok(())
+    }
+
+    /// Apply configured zoom, pan, or reset navigation to the current plot.
+    fn apply_plot_navigation(&mut self, code: &KeyCode) -> bool {
         let bindings = &self.config.ui.bindings;
-        let action = if binding_matches(&code, &bindings.zoom_in) {
+        let action = if binding_matches(code, &bindings.zoom_in) {
             Some(PlotAction::ZoomIn)
-        } else if binding_matches(&code, &bindings.zoom_out) {
+        } else if binding_matches(code, &bindings.zoom_out) {
             Some(PlotAction::ZoomOut)
-        } else if binding_matches(&code, &bindings.pan_left) {
+        } else if binding_matches(code, &bindings.pan_left) {
             Some(PlotAction::PanLeft)
-        } else if binding_matches(&code, &bindings.pan_right) {
+        } else if binding_matches(code, &bindings.pan_right) {
             Some(PlotAction::PanRight)
-        } else if binding_matches(&code, &bindings.reset_view) {
+        } else if binding_matches(code, &bindings.reset_view) {
             Some(PlotAction::Reset)
         } else {
             None
         };
-        if let (Some(plot), Some(action)) = (self.plot.as_mut(), action) {
+        let Some(action) = action else {
+            return false;
+        };
+        if let Some(plot) = self.plot.as_mut() {
             match action {
                 PlotAction::ZoomIn => plot.viewport.zoom_in(),
                 PlotAction::ZoomOut => plot.viewport.zoom_out(),
@@ -275,7 +291,7 @@ impl App {
                 PlotAction::Reset => plot.viewport.reset(),
             }
         }
-        Ok(())
+        true
     }
 
     /// Apply vertical input to the selected field.
@@ -696,7 +712,17 @@ mod tests {
     fn live_keys_switch_mode_and_request_a_graceful_exit() {
         let mut app = app();
         app.flow_state = AppState::Live;
+        app.plot = Some(Plot::new(
+            "live",
+            vec![(100.0, -30.0), (150.0, -10.0), (200.0, -20.0)],
+        ));
         app.live_state.begin();
+        app.handle_start_keys(KeyEvent::new(KeyCode::Char('+'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.plot.as_ref().unwrap().viewport.bounds(), [125.0, 175.0]);
+        app.handle_start_keys(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.show_peak_info);
         app.handle_start_keys(KeyEvent::new(KeyCode::Char('6'), KeyModifiers::NONE))
             .unwrap();
         assert_eq!(app.live_state.mode(), TraceMode::MinDecay);
@@ -717,6 +743,7 @@ mod tests {
             app.init_config().unwrap();
             app.init_progress().unwrap();
             app.plot = Some(Plot::new("test.csv", vec![(240.0, -64.0)]));
+            app.show_peak_info = true;
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             for screen in [
                 AppState::default(),
@@ -733,5 +760,27 @@ mod tests {
                 terminal.draw(|frame| app.draw(frame).unwrap()).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn peak_toggle_renders_the_strongest_visible_sample() {
+        let mut app = App::viewer(
+            Config::default(),
+            PathBuf::from("scan.csv"),
+            vec![(100.0, -30.0), (150.0, -10.0), (200.0, -20.0)],
+        );
+        app.show_peak_info = true;
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal.draw(|frame| app.draw(frame).unwrap()).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Visible peak"));
+        assert!(rendered.contains("-10.00 dBm"));
+        assert!(rendered.contains("150.00 MHz"));
     }
 }

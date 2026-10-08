@@ -53,6 +53,8 @@ pub(crate) struct App {
     pub(crate) live_generation: u64,
     /// Whether the UI should exit after live recovery and final export.
     pub(crate) live_exit_requested: bool,
+    /// Whether the plot overlays the strongest sample in the visible frequency range.
+    pub(crate) show_peak_info: bool,
     /// Validated settings retained when the selection is saved.
     pub(crate) config: Config,
     /// Explicit settings path selected at startup.
@@ -97,6 +99,16 @@ impl Plot {
         }
         self.label = label.into();
         self.data = data;
+    }
+
+    /// Return the strongest sample inside the current horizontal viewport.
+    pub(crate) fn visible_peak(&self) -> Option<(f64, f64)> {
+        let [minimum, maximum] = self.viewport.bounds();
+        self.data
+            .iter()
+            .copied()
+            .filter(|(frequency, _)| (minimum..=maximum).contains(frequency))
+            .reduce(|peak, sample| if sample.1 > peak.1 { sample } else { peak })
     }
 }
 
@@ -596,6 +608,24 @@ mod tests {
         let viewport = FrequencyViewport::from_samples(&[(240.0, -64.0)]);
         let [minimum, maximum] = viewport.bounds();
         assert!(minimum < 240.0 && maximum > 240.0);
+    }
+
+    #[test]
+    fn visible_peak_tracks_the_zoomed_and_panned_viewport() {
+        let mut plot = Plot::new(
+            "test",
+            vec![
+                (100.0, -30.0),
+                (125.0, -10.0),
+                (150.0, -20.0),
+                (200.0, -5.0),
+            ],
+        );
+        assert_eq!(plot.visible_peak(), Some((200.0, -5.0)));
+        plot.viewport.zoom_in();
+        assert_eq!(plot.visible_peak(), Some((125.0, -10.0)));
+        plot.viewport.pan(InputDirection::Right);
+        assert_eq!(plot.visible_peak(), Some((150.0, -20.0)));
     }
 
     #[test]
