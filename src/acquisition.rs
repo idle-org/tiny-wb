@@ -108,13 +108,85 @@ pub fn acquire<T: Read + Write>(
     serial: &SerialConfig,
     mut report: impl FnMut(ScanEvent),
 ) -> Result<Vec<Sample>, AcquisitionError> {
+    let prepared = prepare_acquisition(shell, request, scan, serial, &mut report)?;
+    // Pause may take effect even when its response times out, so recovery also
+    // covers failure receiving the pause response itself.
+    let result = (|| {
+        configure_paused(shell, request, scan, serial, prepared)?;
+        report(ScanEvent::Message("Acquiring samples"));
+        let frame = read_snapshot(shell, request, &mut report)?;
+        Ok(protocol::decode_frame(
+            &frame,
+            request,
+            prepared.zero_offset,
+            scan.frequency_axis,
+        )?)
+    })();
+    let samples = resume_after(shell, prepared, result)?;
+    report(ScanEvent::Message("Acquisition complete"));
+    report(ScanEvent::Progress(100));
+    Ok(samples)
+}
+
+/// Repeatedly acquire complete bounded snapshots on one configured connection.
+///
+/// This deliberately does not use firmware continuous framing. Cancellation is
+/// checked before each snapshot, so an in-progress sweep completes before the
+/// instrument is resumed. `on_sweep` receives only fully decoded frames.
+///
+/// # Errors
+///
+/// Returns an error when validation, device identification, configuration,
+/// transport, frame decoding, or the final resume command fails. When both
+/// acquisition and resume fail, both errors are retained.
+pub fn acquire_live<T: Read + Write>(
+    shell: &mut Shell<T>,
+    request: &ScanRequest,
+    scan: &ScanConfig,
+    serial: &SerialConfig,
+    mut should_stop: impl FnMut() -> bool,
+    mut on_sweep: impl FnMut(Vec<Sample>),
+    mut report: impl FnMut(ScanEvent),
+) -> Result<u64, AcquisitionError> {
+    let prepared = prepare_acquisition(shell, request, scan, serial, &mut report)?;
+    let result = (|| {
+        configure_paused(shell, request, scan, serial, prepared)?;
+        report(ScanEvent::Message("Live capture running"));
+        let mut sweeps = 0_u64;
+        while !should_stop() {
+            let frame = read_snapshot(shell, request, &mut report)?;
+            let samples =
+                protocol::decode_frame(&frame, request, prepared.zero_offset, scan.frequency_axis)?;
+            sweeps = sweeps.saturating_add(1);
+            on_sweep(samples);
+        }
+        Ok(sweeps)
+    })();
+    resume_after(shell, prepared, result)
+}
+
+#[derive(Clone, Copy)]
+struct PreparedAcquisition {
+    delay: Duration,
+    settle: Duration,
+    plan: crate::device::AcquisitionPlan,
+    zero_offset: u16,
+}
+
+fn prepare_acquisition<T: Read + Write>(
+    shell: &mut Shell<T>,
+    request: &ScanRequest,
+    scan: &ScanConfig,
+    serial: &SerialConfig,
+    report: &mut impl FnMut(ScanEvent),
+) -> Result<PreparedAcquisition, AcquisitionError> {
     request.validate()?;
     let delay = Duration::from_millis(serial.command_delay_ms);
     let settle = Duration::from_millis(serial.settle_delay_ms);
     report(ScanEvent::Message("Identifying instrument"));
     report(ScanEvent::Progress(5));
     shell.synchronize()?;
-    let identity = identify_with_retry(shell, delay, settle, &mut report)?;
+    let identity = identify_with_retry(shell, delay, settle, report)?;
     let expected = match scan.device_model {
         ModelSelection::Auto => None,
         ModelSelection::Basic => Some(DeviceModel::Basic),
@@ -176,59 +248,82 @@ pub fn acquire<T: Read + Write>(
         None => {
             return Err(AcquisitionError::MissingZeroReadback {
                 requested: zero_offset,
-            });
+            })
         }
     }
     report(ScanEvent::Progress(20));
-    // Pause may take effect even when its response times out, so recovery also
-    // covers failure receiving the pause response itself.
-    let result = (|| {
-        shell.command_checked("pause", delay, settle)?;
-        shell.command_checked(plan.input_command, delay, settle)?;
-        if plan.enable_ultra_mode {
-            shell.command_checked("ultra on", delay, settle)?;
-        }
-        shell.command_checked(&format!("sweep start {}", request.start_hz), delay, settle)?;
-        shell.command_checked(&format!("sweep stop {}", request.stop_hz), delay, settle)?;
-        let sweep_response = shell.command_checked("sweep", delay, settle)?;
-        if plan.enable_ultra_mode
-            && parse_sweep_bounds(&sweep_response) != Some((request.start_hz, request.stop_hz))
-        {
-            return Err(AcquisitionError::SweepReadbackMismatch {
-                requested_start: request.start_hz,
-                requested_stop: request.stop_hz,
-                response: sweep_response,
-            });
-        }
-        if scan.legacy_pre_scan {
-            shell.command_checked(
-                &format!("scan {} {} 290 101", request.start_hz, request.stop_hz),
-                Duration::from_millis(serial.scan_delay_ms),
-                settle,
-            )?;
-        }
-        report(ScanEvent::Message("Acquiring samples"));
-        shell.send(&format!(
-            "scanraw {} {} {}",
-            request.start_hz, request.stop_hz, request.points
-        ))?;
-        let frame = shell.read_frame(request, |received, expected| {
-            report(ScanEvent::Progress((20 + received * 75 / expected) as u8))
-        })?;
-        Ok(protocol::decode_frame(
-            &frame,
-            request,
-            zero_offset,
-            scan.frequency_axis,
-        )?)
-    })();
-    let recovery = shell.command_checked("resume", delay, settle);
+    Ok(PreparedAcquisition {
+        delay,
+        settle,
+        plan,
+        zero_offset,
+    })
+}
+
+fn configure_paused<T: Read + Write>(
+    shell: &mut Shell<T>,
+    request: &ScanRequest,
+    scan: &ScanConfig,
+    serial: &SerialConfig,
+    prepared: PreparedAcquisition,
+) -> Result<(), AcquisitionError> {
+    shell.command_checked("pause", prepared.delay, prepared.settle)?;
+    shell.command_checked(prepared.plan.input_command, prepared.delay, prepared.settle)?;
+    if prepared.plan.enable_ultra_mode {
+        shell.command_checked("ultra on", prepared.delay, prepared.settle)?;
+    }
+    shell.command_checked(
+        &format!("sweep start {}", request.start_hz),
+        prepared.delay,
+        prepared.settle,
+    )?;
+    shell.command_checked(
+        &format!("sweep stop {}", request.stop_hz),
+        prepared.delay,
+        prepared.settle,
+    )?;
+    let sweep_response = shell.command_checked("sweep", prepared.delay, prepared.settle)?;
+    if prepared.plan.enable_ultra_mode
+        && parse_sweep_bounds(&sweep_response) != Some((request.start_hz, request.stop_hz))
+    {
+        return Err(AcquisitionError::SweepReadbackMismatch {
+            requested_start: request.start_hz,
+            requested_stop: request.stop_hz,
+            response: sweep_response,
+        });
+    }
+    if scan.legacy_pre_scan {
+        shell.command_checked(
+            &format!("scan {} {} 290 101", request.start_hz, request.stop_hz),
+            Duration::from_millis(serial.scan_delay_ms),
+            prepared.settle,
+        )?;
+    }
+    Ok(())
+}
+
+fn read_snapshot<T: Read + Write>(
+    shell: &mut Shell<T>,
+    request: &ScanRequest,
+    report: &mut impl FnMut(ScanEvent),
+) -> Result<Vec<u8>, AcquisitionError> {
+    shell.send(&format!(
+        "scanraw {} {} {}",
+        request.start_hz, request.stop_hz, request.points
+    ))?;
+    Ok(shell.read_frame(request, |received, expected| {
+        report(ScanEvent::Progress((20 + received * 75 / expected) as u8))
+    })?)
+}
+
+fn resume_after<T: Read + Write, R>(
+    shell: &mut Shell<T>,
+    prepared: PreparedAcquisition,
+    result: Result<R, AcquisitionError>,
+) -> Result<R, AcquisitionError> {
+    let recovery = shell.command_checked("resume", prepared.delay, prepared.settle);
     match (result, recovery) {
-        (Ok(samples), Ok(_)) => {
-            report(ScanEvent::Message("Acquisition complete"));
-            report(ScanEvent::Progress(100));
-            Ok(samples)
-        }
+        (Ok(value), Ok(_)) => Ok(value),
         (Err(primary), Err(recovery)) => Err(AcquisitionError::Recovery {
             primary: Box::new(primary),
             recovery,
@@ -298,6 +393,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use std::{
+        cell::Cell,
         io::{self, Cursor},
         sync::{Arc, Mutex},
     };
@@ -429,6 +525,57 @@ mod tests {
         assert!(written.starts_with("version\rinfo\rversion\rinfo\rhelp\r"));
         assert_eq!(written.matches("version\r").count(), 2);
         assert!(events.contains(&ScanEvent::Message("Retrying instrument identification")));
+    }
+
+    #[test]
+    fn live_acquisition_repeats_complete_snapshots_then_resumes() {
+        let config = Config::from_toml(
+            "[scan]\nlegacy_pre_scan=false\n[serial]\ncommand_delay_ms=0\nsettle_delay_ms=0",
+        )
+        .unwrap();
+        let request = ScanRequest {
+            start_hz: 240_000_000,
+            stop_hz: 960_000_000,
+            points: 2,
+            repeat: 1,
+        };
+        let mut input = b"ch>tinySA_v1.4-test\r\nch>tinySA\r\nch>Commands: repeat zero pause mode sweep scanraw resume\r\nch>"
+            .to_vec();
+        input.extend_from_slice(b"okch>".repeat(2).as_slice());
+        input.extend_from_slice(b"128dBm\r\nch>");
+        input.extend_from_slice(b"okch>".repeat(5).as_slice());
+        input.extend_from_slice(b"{x\0\x08x\0\x10}ch>");
+        input.extend_from_slice(b"{x\0\x10x\0\x18}ch>okch>");
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let mut shell = Shell::new(
+            Transcript {
+                input: Cursor::new(input),
+                commands: commands.clone(),
+            },
+            1024,
+        );
+        let received = Cell::new(0_u64);
+        let mut levels = Vec::new();
+
+        let sweeps = acquire_live(
+            &mut shell,
+            &request,
+            &config.scan,
+            &config.serial,
+            || received.get() == 2,
+            |samples| {
+                received.set(received.get() + 1);
+                levels.push(samples[0].level_dbm);
+            },
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(sweeps, 2);
+        assert_eq!(levels, vec![-64.0, 0.0]);
+        let written = String::from_utf8(commands.lock().unwrap().clone()).unwrap();
+        assert_eq!(written.matches("scanraw ").count(), 2);
+        assert!(written.ends_with("resume\r"));
     }
 
     #[test]

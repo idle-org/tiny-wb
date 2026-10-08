@@ -41,7 +41,7 @@ model-detection entry. Hardware and extended-range gates remain open.
 | Basic | Low/high selection, one-shot raw sweep, repeat, configurable zero offset, resume attempt | Hardware qualification, processing/input controls, generator and complete workflows |
 | Ultra | Synthetic profile; experimental physical validator at 240–300 MHz | Model detection, normal/extended range planning, Ultra-specific controls and qualification |
 | Transport | Buffered mixed text/binary I/O, complete writes, bounded responses, serial/TCP adapters | Overall deadlines, abort, reconnect, typed replies and full recovery |
-| Interface | One scan per TUI launch, plot and CSV | Headless commands, repeat/live operation, capability-aware controls |
+| Interface | Rescan/settings return, repeated-snapshot live plot, bounded host trace calculations, plot and CSV | Headless commands, native continuous framing, subtraction/reference buffers and capability-aware controls |
 | Verification | Regression/mock tests, CI gates, guided hardware validator | Captured real-device fixtures, RF reference measurements and platform matrix |
 
 - [x] F01–F04: reusable library, injected I/O, bounded mock profiles and loopback tests.
@@ -320,8 +320,10 @@ reference measurements verify exported amplitude and visible correction state.
   only for advertised forms. Verify frequency/value lengths and record counts.
 - [ ] Introduce trace metadata: device/build/profile, requested and actual range,
   axis policy, offset, RF path, processing, timestamps and completion status.
-- [ ] Support repeated snapshots before native continuous frames; both need
-  bounded queues, cancellation, backpressure and explicit dropped-frame counts.
+- [x] Support repeated complete snapshots with bounded sixteen-sweep history,
+  frame-boundary cancellation and no partial-frame publication.
+- [ ] Add native continuous frames with bounded queues, backpressure, verified
+  abort/resynchronization and explicit dropped-frame counts.
 - [ ] Preserve current two-column CSV compatibility. Add opt-in metadata sidecars
   or a documented versioned format; keep serialization independent of paths.
 - [ ] Define atomic completion for trace plus metadata and a clearly labeled
@@ -465,8 +467,9 @@ Depends incrementally on P01/P02 and each exposed feature.
 
 - [ ] Display model/build/connection state and derive field limits/choices from
   capabilities. Explain unavailable features rather than offering illegal values.
-- [ ] Add rescan and return-to-settings without restarting, live plots, marker
-  controls and appropriate analyzer/generator/preset screens.
+- [x] Add rescan, return-to-settings and a repeated-snapshot live plot without
+  restarting the process.
+- [ ] Add marker controls and appropriate analyzer/generator/preset screens.
 - [ ] Keep worker events/state updates outside rendering; add cancel, recovery,
   trigger-wait and reconnect states without blocking the event loop.
 - [ ] Label MHz/dBm/time axes, selected path, corrections, output state and dropped

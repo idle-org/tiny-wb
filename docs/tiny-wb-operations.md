@@ -17,7 +17,8 @@ can represent it in the UI.
 | Ultra+ ZS406 0.1–900 MHz | Hardware communications validated | Explicit ZS406/V0.4.6 identity permits the full normal-mode range; RF accuracy is not qualified. |
 | Ultra+ ZS406 above 900 MHz through 5.4 GHz | Opt-in; hardware communications validated | Requires `scan.enable_ultra_mode = true`, sends `ultra on`, and verifies sweep readback. Expect slower scans, aliases/spurs and RF-port LO leakage. |
 | ZS407 extended mode or any harmonic mode | Rejected | Their different ceilings and measurement behavior are not implemented. |
-| Generator control, live streaming, capture, calibration, firmware update | Out of scope | No corresponding application workflow exists. |
+| Repeated-snapshot live display | Implemented; awaiting hardware qualification | `--live` retains a bounded 16-sweep history and one point buffer per derived hold/decay trace. It does not use native continuous framing. |
+| Generator control, display capture, calibration, firmware update | Out of scope | No corresponding application workflow exists. |
 
 At the exact 350 MHz boundary, the implementation's matching rules matter:
 low accepts frequencies strictly below 350 MHz, while high accepts 350 MHz
@@ -58,6 +59,18 @@ open its renderer directly:
 
 Run it from the working directory for your settings and output, or set
 `TINY_WB_CONFIG` to another configuration path. See [configuration](configuration.md).
+
+For live display, launch:
+
+```console
+./target/release/tiny-wb --live
+```
+
+Select the connection and scan parameters normally. The configured Points value
+is the fixed size of every live sweep and visible/exported trace. tiny-wb opens
+one connection, configures it once, and requests repeated complete `scanraw`
+snapshots. This deliberately avoids firmware continuous framing until abort and
+stream-resynchronization behavior is verified on supported hardware.
 
 ### Serial permissions
 
@@ -139,6 +152,31 @@ prefilled so they can be edited before starting another scan. These restart keys
 are not available when viewing a CSV directly. Plot bindings are configurable
 under `[ui.bindings]`; on acquired results, `r` and `n` take precedence over any
 matching plot binding. `q`, Escape, or Enter exits the renderer.
+
+### Live display
+
+Live mode updates the plot only after a complete, validated sweep. Its host-side
+calculation keys are:
+
+| Key | Visible buffer |
+| --- | --- |
+| `1` | Rolling arithmetic average of up to 4 sweeps |
+| `2` | Rolling arithmetic average of up to 16 sweeps |
+| `3` | Maximum held at each frequency since live capture began |
+| `4` | Maximum with a 1 dB fall per completed sweep, limited by the new value |
+| `5` | Minimum held at each frequency since live capture began |
+| `6` | Minimum with a 1 dB rise per completed sweep, limited by the new value |
+
+The history is bounded to 16 complete sweeps regardless of run duration. Hold
+and decay calculations retain one value per configured point. `s` writes the
+currently selected buffer to a new collision-safe CSV while capture continues.
+`q`, Escape, or Enter requests a stop; the current sweep is allowed to finish,
+the instrument receives `resume`, the selected buffer is saved, and the program
+exits. A transport failure is reported rather than exporting a partial frame.
+
+Subtraction/reference-buffer processing is not implemented yet. The live modes
+are host calculations over repeated snapshots, not claims about the firmware's
+front-panel detector or trace modes, and require physical-device qualification.
 
 ## Files
 

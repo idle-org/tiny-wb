@@ -43,6 +43,11 @@ From the repository root:
 cargo run --release
 ```
 
+Use `cargo run --release -- --live` to confirm the usual connection and scan
+settings, then display repeated complete sweeps until stopped. Number keys select
+average/hold/decay traces, `s` saves the visible buffer, and `q`, Escape, or
+Enter stops, resumes the instrument, saves once more, and exits.
+
 On Linux the serial device is commonly `/dev/ttyACM0`; on Windows it appears as
 a COM port. If the port cannot be opened, follow the
 [serial-permission guidance](docs/tiny-wb-operations.md#serial-permissions).

@@ -29,6 +29,9 @@ pub(crate) enum AppError {
     /// Acquisition failed, potentially including a failed resume attempt.
     #[error(transparent)]
     Acquisition(#[from] tiny_wb::acquisition::AcquisitionError),
+    /// Host-side live trace processing failed.
+    #[error("live capture: {0}")]
+    Live(String),
     /// The file logger could not be initialized.
     #[error("logging: {0}")]
     Logger(#[from] flexi_logger::FlexiLoggerError),

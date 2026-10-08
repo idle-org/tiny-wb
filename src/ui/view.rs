@@ -19,9 +19,80 @@ impl App {
             AppState::SelectingConnection(_) => self.draw_config(frame),
             AppState::SelectingScan(_) => self.draw_final_config(frame),
             AppState::Scanning => self.draw_progress(frame),
+            AppState::Live => self.draw_live(frame),
             AppState::Complete => self.draw_end_window(frame),
             AppState::Error => self.draw_error(frame),
         }
+    }
+
+    /// Render the newest complete live snapshot while the worker continues.
+    fn draw_live(&mut self, frame: &mut Frame<'_>) -> Result<(), UiError> {
+        let [_, main, _] = Layout::horizontal([
+            Constraint::Min(2),
+            Constraint::Percentage(96),
+            Constraint::Min(2),
+        ])
+        .areas(frame.area());
+        let [status_area, graph_area, footer_area] = Layout::vertical([
+            Constraint::Length(4),
+            Constraint::Min(4),
+            Constraint::Length(2),
+        ])
+        .areas(main);
+        let status = format!(
+            "{} — {}\n{}",
+            self.live_state.mode(),
+            self.live_state.message(),
+            self.live_state.info()
+        );
+        frame.render_widget(
+            Paragraph::new(status)
+                .wrap(Wrap { trim: true })
+                .block(Block::bordered().title("Live capture")),
+            status_area,
+        );
+        if let Some(plot) = self.plot.as_ref() {
+            let bounds = plot.viewport.bounds();
+            let span = bounds[1] - bounds[0];
+            let midpoint = (bounds[0] + bounds[1]) / 2.0;
+            let chart = Chart::new(vec![Dataset::default()
+                .marker(Marker::Dot)
+                .graph_type(GraphType::Scatter)
+                .style(Style::new().yellow())
+                .data(&plot.data)])
+            .x_axis(
+                Axis::default()
+                    .title("Frequency (MHz)")
+                    .bounds(bounds)
+                    .labels([
+                        format_frequency(bounds[0], span),
+                        format_frequency(midpoint, span),
+                        format_frequency(bounds[1], span),
+                    ]),
+            )
+            .y_axis(
+                Axis::default()
+                    .title("Level (dBm)")
+                    .bounds([self.config.ui.chart_min_dbm, self.config.ui.chart_max_dbm]),
+            );
+            frame.render_widget(chart, graph_area);
+        } else {
+            frame.render_widget(
+                Paragraph::new("Waiting for the first complete sweep…")
+                    .centered()
+                    .block(Block::bordered()),
+                graph_area,
+            );
+        }
+        frame.render_widget(
+            Paragraph::new(
+                "1 avg4 · 2 avg16 · 3 max hold · 4 max decay · 5 min hold · 6 min decay · s save · q stop+save",
+            )
+            .centered()
+            .wrap(Wrap { trim: true }),
+            footer_area,
+        );
+        Ok(())
     }
 
     /// Render scan settings with the focused field highlighted.

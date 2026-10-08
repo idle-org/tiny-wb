@@ -11,7 +11,7 @@ use strum::FromRepr;
 
 use crate::{
     error::{AppError, UiError},
-    scan::ScanState,
+    scan::{LiveState, ScanState},
 };
 use tiny_wb::{config::Config, protocol::ScanRequest};
 
@@ -45,6 +45,14 @@ pub(crate) struct App {
     pub(crate) repeat: NumericInput,
     /// Shared acquisition telemetry; request settings are passed separately.
     pub(crate) scan_state: ScanState,
+    /// Shared repeated-snapshot state used only by `--live` sessions.
+    pub(crate) live_state: LiveState,
+    /// Whether scans launched from the settings screen should run continuously.
+    pub(crate) live_enabled: bool,
+    /// Last live generation copied into the plot.
+    pub(crate) live_generation: u64,
+    /// Whether the UI should exit after live recovery and final export.
+    pub(crate) live_exit_requested: bool,
     /// Validated settings retained when the selection is saved.
     pub(crate) config: Config,
     /// Explicit settings path selected at startup.
@@ -77,6 +85,18 @@ impl Plot {
             data,
             viewport,
         }
+    }
+
+    /// Replace samples without resetting a compatible live viewport.
+    pub(crate) fn replace_data(&mut self, label: impl Into<String>, data: Vec<(f64, f64)>) {
+        let replacement = FrequencyViewport::from_samples(&data);
+        if self.viewport.full_min != replacement.full_min
+            || self.viewport.full_max != replacement.full_max
+        {
+            self.viewport = replacement;
+        }
+        self.label = label.into();
+        self.data = data;
     }
 }
 
@@ -289,6 +309,8 @@ pub(crate) enum AppState {
     Complete,
     /// Acquisition and export progress.
     Scanning,
+    /// Repeated complete snapshots displayed while acquisition continues.
+    Live,
     /// Error window
     Error,
 }

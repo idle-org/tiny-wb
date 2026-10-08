@@ -21,7 +21,7 @@ use state::{
 };
 use std::{path::PathBuf, thread, time::Duration};
 use strum::EnumCount;
-use tiny_wb::{config::Config, protocol::ScanRequest};
+use tiny_wb::{config::Config, live::TraceMode, protocol::ScanRequest};
 
 impl App {
     /// Construct UI state from already validated settings; no file I/O here.
@@ -53,12 +53,23 @@ impl App {
             ),
             repeat: NumericInput::new(config.repeat, 1, 1, config.scan.max_repeat),
             scan_state: ScanState::default(),
+            live_state: scan::LiveState::default(),
+            live_enabled: false,
+            live_generation: 0,
+            live_exit_requested: false,
             plot: None,
             last_scan: None,
             can_acquire: true,
             config,
             config_path,
         }
+    }
+
+    /// Construct an acquisition UI whose confirmed settings launch live mode.
+    pub(crate) fn live(info: Vec<SerialPortInfo>, config: Config, config_path: PathBuf) -> Self {
+        let mut app = Self::new(info, config, config_path);
+        app.live_enabled = true;
+        app
     }
 
     /// Construct the renderer directly from an already parsed CSV plot.
@@ -81,12 +92,16 @@ impl App {
                 self.scan_state.fail(error);
                 self.flow_state = AppState::Error;
             }
+            self.refresh_live();
             let mut draw_error = None;
             terminal.draw(|frame| {
                 draw_error = self.draw(frame).err();
             })?;
             if let Some(error) = draw_error {
                 return Err(error.into());
+            }
+            if self.should_quit {
+                break;
             }
             let timeout = Duration::from_millis(self.config.ui.poll_interval_ms);
             if event::poll(timeout)? {
@@ -96,9 +111,6 @@ impl App {
                         self.flow_state = AppState::Error;
                     };
                 };
-                if self.should_quit {
-                    break;
-                }
             }
         }
         Ok(())
@@ -153,6 +165,9 @@ impl App {
         if matches!(self.flow_state, AppState::Complete) {
             return self.handle_plot_key(key.code);
         }
+        if matches!(self.flow_state, AppState::Live) {
+            return self.handle_live_key(key.code);
+        }
         if self.handle_numeric_editor_key(key.code) {
             return Ok(());
         }
@@ -166,6 +181,24 @@ impl App {
                 AppState::Scanning => (),
                 _ => self.next_step()?,
             },
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Apply live processing, save and graceful-stop controls.
+    fn handle_live_key(&mut self, code: KeyCode) -> Result<(), UiError> {
+        match code {
+            KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter => {
+                self.live_exit_requested = true;
+                self.live_state.request_stop();
+            }
+            KeyCode::Char('s') => self.live_state.request_save(),
+            KeyCode::Char(key) => {
+                if let Some(mode) = TraceMode::from_key(key) {
+                    self.live_state.set_mode(mode);
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -260,6 +293,7 @@ impl App {
             },
             AppState::Complete => (),
             AppState::Scanning => (),
+            AppState::Live => (),
             AppState::Error => (),
         }
     }
@@ -299,6 +333,7 @@ impl App {
             }
             AppState::Complete => None,
             AppState::Scanning => None,
+            AppState::Live => None,
             AppState::Error => None,
         } {
             self.flow_state = s;
@@ -322,6 +357,7 @@ impl App {
                 self.should_quit = true;
             }
             AppState::Scanning => {}
+            AppState::Live => {}
             AppState::Error => {
                 self.should_quit = true;
             }
@@ -343,7 +379,11 @@ impl App {
             .map_err(tiny_wb::acquisition::AcquisitionError::from)
             .map_err(AppError::from)?;
         config.save(&self.config_path).map_err(AppError::from)?;
-        self.launch_scan(request, config)
+        if self.live_enabled {
+            self.launch_live(request, config)
+        } else {
+            self.launch_scan(request, config)
+        }
     }
 
     /// Relaunch the exact request and settings used by the previous scan.
@@ -369,6 +409,22 @@ impl App {
         });
         Ok(())
     }
+
+    /// Reset live history and start one persistent repeated-snapshot worker.
+    fn launch_live(&mut self, request: ScanRequest, config: Config) -> Result<(), UiError> {
+        self.live_state.begin();
+        self.live_generation = 0;
+        self.live_exit_requested = false;
+        self.flow_state = AppState::Live;
+        self.plot = None;
+        let live = self.live_state.clone();
+        thread::spawn(move || {
+            if let Err(error) = scan::run_live(live.clone(), request, config) {
+                live.fail(error);
+            }
+        });
+        Ok(())
+    }
     /// Transfer completed samples once and keep rendering free of transitions.
     fn refresh_scan(&mut self) -> Result<(), UiError> {
         if matches!(self.flow_state, AppState::Scanning) {
@@ -383,6 +439,34 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// Copy at most one newly completed live trace into renderer-owned storage.
+    fn refresh_live(&mut self) {
+        if !matches!(self.flow_state, AppState::Live) {
+            return;
+        }
+        if let Some(snapshot) = self.live_state.snapshot_after(self.live_generation) {
+            self.live_generation = snapshot.generation;
+            let label = format!("Live {} — {} sweeps", snapshot.mode, snapshot.sweeps);
+            if let Some(plot) = self.plot.as_mut() {
+                plot.replace_data(label, snapshot.data);
+            } else {
+                self.plot = Some(Plot::new(label, snapshot.data));
+            }
+        }
+        match self.live_state.status() {
+            ScanStatus::Failed => {
+                self.scan_state.fail(
+                    self.live_state
+                        .error()
+                        .unwrap_or_else(|| "live capture failed".into()),
+                );
+                self.flow_state = AppState::Error;
+            }
+            ScanStatus::Complete if self.live_exit_requested => self.should_quit = true,
+            ScanStatus::Ready | ScanStatus::Running | ScanStatus::Complete => {}
+        }
     }
 }
 
@@ -609,6 +693,24 @@ mod tests {
     }
 
     #[test]
+    fn live_keys_switch_mode_and_request_a_graceful_exit() {
+        let mut app = app();
+        app.flow_state = AppState::Live;
+        app.live_state.begin();
+        app.handle_start_keys(KeyEvent::new(KeyCode::Char('6'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.live_state.mode(), TraceMode::MinDecay);
+        app.handle_start_keys(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.live_exit_requested);
+        assert!(
+            !app.should_quit,
+            "worker recovery and final save must finish first"
+        );
+        assert_eq!(app.live_state.message(), "Stopping after the current sweep");
+    }
+
+    #[test]
     fn every_screen_renders_without_a_physical_terminal() {
         for (width, height) in [(120, 40), (40, 10), (1, 1)] {
             let mut app = app();
@@ -623,6 +725,7 @@ mod tests {
                 AppState::SelectingScan(SelectedScan::Points),
                 AppState::SelectingScan(SelectedScan::Repeat),
                 AppState::Scanning,
+                AppState::Live,
                 AppState::Complete,
                 AppState::Error,
             ] {

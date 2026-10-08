@@ -27,6 +27,7 @@ pub mod config;
 pub mod connection;
 pub mod device;
 pub mod export;
+pub mod live;
 /// Opt-in deterministic simulator and TCP server support.
 #[cfg(feature = "mock")]
 pub mod mock;

@@ -15,6 +15,8 @@ use tiny_wb::config::{Backend, Config};
 enum StartMode {
     /// Configure and acquire a new scan.
     Acquire,
+    /// Configure and run repeated snapshots until the user stops them.
+    Live,
     /// Open an existing CSV directly in the renderer.
     View(PathBuf),
     /// Print command help without loading configuration.
@@ -26,12 +28,15 @@ fn parse_start_mode(args: impl IntoIterator<Item = OsString>) -> Result<StartMod
     let args: Vec<OsString> = args.into_iter().collect();
     match args.as_slice() {
         [] => Ok(StartMode::Acquire),
+        [flag] if flag == "--live" => Ok(StartMode::Live),
         [flag] if flag == "-h" || flag == "--help" => Ok(StartMode::Help),
         [flag, path] if flag == "--view" => Ok(StartMode::View(PathBuf::from(path))),
         [path] if !path.to_string_lossy().starts_with('-') => {
             Ok(StartMode::View(PathBuf::from(path)))
         }
-        _ => Err(AppError::Usage("usage: tiny-wb [--view] [SCAN.csv]".into())),
+        _ => Err(AppError::Usage(
+            "usage: tiny-wb [--live | --view SCAN.csv | SCAN.csv]".into(),
+        )),
     }
 }
 
@@ -49,7 +54,7 @@ fn main() -> Result<(), AppError> {
     color_eyre::install()?;
     let mode = parse_start_mode(std::env::args_os().skip(1))?;
     if mode == StartMode::Help {
-        println!("tiny-wb [--view] [SCAN.csv]\n\nWith no CSV, acquire a scan. With a CSV path, open the plot renderer directly.");
+        println!("tiny-wb [--live | --view SCAN.csv | SCAN.csv]\n\nWith no option, acquire one scan. --live repeats complete snapshots until stopped. With a CSV path, open the plot renderer directly.");
         return Ok(());
     }
     let config_path = std::env::var_os("TINY_WB_CONFIG")
@@ -82,8 +87,9 @@ fn main() -> Result<(), AppError> {
         .log_to_file(FileSpec::default().directory(&config.logging.directory))
         .write_mode(WriteMode::BufferAndFlush)
         .start()?;
+    let live_mode = mode == StartMode::Live;
     let mut app = match mode {
-        StartMode::Acquire => {
+        StartMode::Acquire | StartMode::Live => {
             let ports = match config.connection.backend {
                 Backend::Serial => serialport::available_ports()?,
                 Backend::Tcp => vec![serialport::SerialPortInfo {
@@ -91,7 +97,11 @@ fn main() -> Result<(), AppError> {
                     port_type: serialport::SerialPortType::Unknown,
                 }],
             };
-            ui::App::new(ports, config, config_path)
+            if live_mode {
+                ui::App::live(ports, config, config_path)
+            } else {
+                ui::App::new(ports, config, config_path)
+            }
         }
         StartMode::View(path) => ui::App::viewer(
             config,
@@ -113,6 +123,10 @@ mod tests {
     #[test]
     fn command_line_selects_acquisition_help_and_csv_viewer() {
         assert_eq!(parse_start_mode([]).unwrap(), StartMode::Acquire);
+        assert_eq!(
+            parse_start_mode([OsString::from("--live")]).unwrap(),
+            StartMode::Live
+        );
         assert_eq!(
             parse_start_mode([OsString::from("--help")]).unwrap(),
             StartMode::Help

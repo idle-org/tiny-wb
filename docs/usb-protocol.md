@@ -82,9 +82,11 @@ Constraints visible in upstream firmware:
 - waterfall is disabled before acquisition in current firmware;
 - a continuous request must be explicitly aborted and needs a streaming parser.
 
-tiny-wb omits OPTIONS, so it requests one buffered acquisition. The firmware
-buffers in small blocks internally; “buffered” does not mean the entire sweep
-is delivered in a single USB transfer.
+tiny-wb omits OPTIONS, so ordinary acquisition requests one buffered sweep and
+`--live` repeats that complete request over one configured connection. The
+firmware buffers in small blocks internally; “buffered” does not mean the entire
+sweep is delivered in a single USB transfer. Native option-2 continuous framing
+remains unsupported until explicit abort and resynchronization are verified.
 
 ## Binary response framing
 

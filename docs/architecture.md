@@ -20,7 +20,8 @@ widgets, port discovery, worker threads, or the application's working directory.
 | `examples/mock-tinysa-server.rs` | Portable TCP listener for the mock, outside release binaries. |
 | `src/acquisition.rs` | Command ordering, progress events, frame decoding and resume attempts. |
 | `src/export.rs` | CSV parsing/serialization over I/O traits and collision-safe file export. |
-| `src/main.rs` | Select acquisition/direct-view mode, load configuration, start diagnostics, enumerate ports when needed and manage terminal lifetime. |
+| `src/live.rs` | Bounded rolling average, hold and decay calculations over explicit sweeps. |
+| `src/main.rs` | Select single/live/direct-view mode, load configuration, start diagnostics, enumerate ports when needed and manage terminal lifetime. |
 | `src/error.rs` | Application/UI boundary errors with original context. |
 | `src/scan.rs` | Open the configured connection, adapt core events to shared progress, and export successful acquisitions. |
 | `src/ui/mod.rs` | Screen transitions, keyboard handling, worker startup and progress reconciliation. |
@@ -73,6 +74,7 @@ SelectingConnection -> SelectingScan -> Scanning -> Complete -> exit
           |                  |             |
           +------------------+-------------+-> Error -> exit
 CSV file -------------------------------------> Complete -> exit
+--live: SelectingConnection -> SelectingScan -> Live --stop+save--> exit
 ```
 
 The constructor takes configuration and enumerated ports as values, without
@@ -86,6 +88,13 @@ prefilled scan editor; a standalone CSV remains view-only.
 Zooming and panning mutate only that viewport, not sample data. This plot
 boundary can grow into a tabbed collection without coupling CSV parsing or
 acquisition to Ratatui.
+
+Live mode uses repeated complete snapshots over one configured connection. The
+worker publishes only decoded sweeps into a bounded `TraceBuffer`; rendering
+copies at most once per completed sweep. Stop and save requests cross the shared
+state boundary, while device I/O and CSV creation remain in the worker. Native
+continuous `scanraw` is intentionally deferred because it needs verified abort
+syntax and stream resynchronization.
 
 The terminal guard restores terminal modes on ordinary returns and unwinding.
 Configuration and direct-view CSV errors occur before logger initialization;
