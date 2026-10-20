@@ -2,8 +2,8 @@
 
 The release matrix includes Linux, Windows, Apple Silicon and Intel macOS.
 Apple builds require a Linux release host and macOS 13.0 or newer to run.
-See [macOS cross-compilation](macos.md) for native validation and the optional
-diagnostic build script.
+See [macOS cross-compilation](macos.md) for platform requirements and native
+validation.
 
 `release.sh` delegates to the deliberately named
 [`rust_realease`](https://proxy.dandaedre.com/gitea/idle-org/rust_realease).
@@ -93,8 +93,8 @@ intentionally replaced so releases use the reviewed, tracked configuration.
 
 The Apple image digest, deployment minimum and SDK path are explicit in
 `[build.apple]`. `CROSS_CONTAINER_ENGINE` selects the engine for both backends;
-Apple builds ignore `CROSS_CONFIG`. No separate `build-macos.sh` invocation is
-needed. The publisher checks Mach-O architecture, deployment minimum and system
+Apple builds ignore `CROSS_CONFIG`. All targets use the same release entry point.
+The publisher checks Mach-O architecture, deployment minimum and system
 library paths, then packages the binaries into the same release as Cross outputs.
 The four-target matrix produces eight payload assets plus `SHA256SUMS`.
 Apple executables are unsigned and unnotarized; there is no universal binary or

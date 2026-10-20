@@ -43,10 +43,10 @@ From the repository root:
 cargo run --release
 ```
 
-For Apple Silicon and Intel macOS binaries built from Linux, run
-`./scripts/build-macos.sh`; see [macOS build requirements and validation](docs/macos.md).
-The [release workflow](docs/releases.md) packages both macOS architectures
-alongside Linux and Windows.
+For Apple Silicon and Intel macOS binaries built from Linux, use the
+[release workflow](docs/releases.md): `./release.sh --compile-only` packages
+both macOS architectures alongside Linux and Windows. See
+[macOS requirements and validation](docs/macos.md).
 
 Use `cargo run --release -- --live` to confirm the usual connection and scan
 settings, then display repeated complete sweeps until stopped. Number keys select
