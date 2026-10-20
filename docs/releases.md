@@ -1,5 +1,9 @@
 # Releasing tiny-wb
 
+For compile-only Apple Silicon and Intel macOS binaries using a pinned Zig
+container, see [macOS cross-compilation](macos.md). That separate build command
+does not add Apple artifacts to the publisher's Linux/Windows matrix below.
+
 `release.sh` delegates to the deliberately named
 [`rust_realease`](https://proxy.dandaedre.com/gitea/idle-org/rust_realease).
 It is based on the

@@ -43,6 +43,9 @@ From the repository root:
 cargo run --release
 ```
 
+For Apple Silicon and Intel macOS binaries built from Linux, run
+`./scripts/build-macos.sh`; see [macOS build requirements and validation](docs/macos.md).
+
 Use `cargo run --release -- --live` to confirm the usual connection and scan
 settings, then display repeated complete sweeps until stopped. Number keys select
 average/hold/decay traces, `s` saves the visible buffer, and `q`, Escape, or
