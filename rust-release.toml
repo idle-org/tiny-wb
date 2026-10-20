@@ -7,9 +7,20 @@ tag-prefix = ""
 # Desktop targets. Linux uses glibc because serialport links system libudev.
 # release/Cross.toml injects target libudev/pkg-config; the base images provide
 # the remaining target toolchains, including the Windows windres executable.
-targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
 profile = "release"
 locked = true
+
+# Apple targets use the publisher's direct cargo-zigbuild backend, not Cross.
+[build.apple]
+image = "ghcr.io/rust-cross/cargo-zigbuild@sha256:9b4f6b3eb9e8f9fefb3960fe288ddba576627d66d9eff851ce7f62d2455564a5"
+deployment-target = "13.0"
+sdk-root = "/opt/MacOSX11.3.sdk"
 
 [gitea]
 token-env = "GITEA_TOKEN"

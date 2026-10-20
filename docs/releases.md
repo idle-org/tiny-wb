@@ -1,8 +1,9 @@
 # Releasing tiny-wb
 
-For compile-only Apple Silicon and Intel macOS binaries using a pinned Zig
-container, see [macOS cross-compilation](macos.md). That separate build command
-does not add Apple artifacts to the publisher's Linux/Windows matrix below.
+The release matrix includes Linux, Windows, Apple Silicon and Intel macOS.
+Apple builds require a Linux release host and macOS 13.0 or newer to run.
+See [macOS cross-compilation](macos.md) for native validation and the optional
+diagnostic build script.
 
 `release.sh` delegates to the deliberately named
 [`rust_realease`](https://proxy.dandaedre.com/gitea/idle-org/rust_realease).
@@ -21,8 +22,8 @@ with a dry run and obtain publication authorization separately.
 | Binary | `tiny-wb` (`tiny-wb.exe` on Windows); the library is not a release binary. |
 | Version | Literal `[package].version` in `Cargo.toml`; never duplicated in the wrapper. |
 | Tag | Package version without a prefix, preserving existing tags such as `0.1.1`. |
-| Profile | `release`, for both targets; the older custom `windows` profile is not selected. |
-| Targets | `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-gnu`. |
+| Profile | `release`, for all four targets; the older custom `windows` profile is not selected. |
+| Targets | `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-gnu`, `aarch64-apple-darwin`, `x86_64-apple-darwin`. |
 | Artifacts | Both cargo-binstall `.tgz` archives and standalone executables, plus `SHA256SUMS`. |
 | Builds | Locked dependencies; tracked `Cargo.lock`; review toolchain/container inputs for repeatability. |
 | Public repository | `https://proxy.dandaedre.com/gitea/idle-org/tiny-wb`. |
@@ -32,9 +33,9 @@ with a dry run and obtain publication authorization separately.
 `rust-release.toml` sets the target matrix, profile, tag prefix, lock policy,
 `GITEA_TOKEN` variable and exact origin-to-public-URL fallback. This avoids
 copying the publisher's musl/ARM defaults: tiny-wb uses system libudev on Linux,
-and its documented desktop platforms are Linux and Windows. FreeBSD remains
-a CI host, not an additional promised release artifact. Target builds are not
-yet verified. Do not infer compatibility merely from the configured matrix.
+and Apple targets use the publisher's direct cargo-zigbuild backend. FreeBSD
+remains a CI host, not an additional promised release artifact. Cross-compilation
+does not establish native runtime or hardware compatibility.
 
 The fallback does not rewrite the Git origin. `Cargo.toml` records the public
 repository and the publisher-compatible binstall archive layout. Tag URLs lack
@@ -45,6 +46,10 @@ tiny-wb-x86_64-unknown-linux-gnu-v0.1.1.tgz
 tiny-wb-x86_64-unknown-linux-gnu-v0.1.1
 tiny-wb-x86_64-pc-windows-gnu-v0.1.1.tgz
 tiny-wb-x86_64-pc-windows-gnu-v0.1.1.exe
+tiny-wb-aarch64-apple-darwin-v0.1.1.tgz
+tiny-wb-aarch64-apple-darwin-v0.1.1
+tiny-wb-x86_64-apple-darwin-v0.1.1.tgz
+tiny-wb-x86_64-apple-darwin-v0.1.1
 SHA256SUMS
 ```
 
@@ -59,10 +64,10 @@ is published to crates.io. This workflow does not run `cargo publish`.
 Required: Git, Cargo/Rust (at least the declared MSRV), `rust_realease`, Cross,
 and a usable Docker or Podman backend. Archives additionally need cargo-binstall
 for installation verification. Local wrapper tests use Python 3.11+ (`tomllib`).
-There is currently no repository pin for the publisher; the inspected upstream
-source identifies itself as version 0.1.4. Confirm its installed version and
-help before use. Tool installation is a maintainer action, not performed by
-the wrapper. Upstream's preferred installation command is:
+Use a publisher containing automated Apple support, released upstream in
+`0.1.6-rc.3`; older publishers may reject `[build.apple]`. There is no repository
+pin for the publisher. Confirm its installed version and help before use.
+Tool installation is a maintainer action, not performed by the wrapper. Upstream's preferred installation command is:
 
 ```console
 cargo binstall --git https://proxy.dandaedre.com/gitea/idle-org/rust_realease rust_realease
@@ -86,6 +91,20 @@ from the repository root because the publisher rejects root `pre-build`,
 image's Debian/Ubuntu repositories. A caller-supplied `CROSS_CONFIG` is
 intentionally replaced so releases use the reviewed, tracked configuration.
 
+The Apple image digest, deployment minimum and SDK path are explicit in
+`[build.apple]`. `CROSS_CONTAINER_ENGINE` selects the engine for both backends;
+Apple builds ignore `CROSS_CONFIG`. No separate `build-macos.sh` invocation is
+needed. The publisher checks Mach-O architecture, deployment minimum and system
+library paths, then packages the binaries into the same release as Cross outputs.
+The four-target matrix produces eight payload assets plus `SHA256SUMS`.
+Apple executables are unsigned and unnotarized; there is no universal binary or
+`.app` bundle. Runtime verification is explicitly skipped on Linux.
+
+This migration follows the upstream
+[automated macOS release guide](https://proxy.dandaedre.com/gitea/idle-org/rust_realease/raw/branch/main/docs/automated-macos-releases.md),
+reviewed on 2026-10-20. Its reported four-target build is upstream evidence,
+not a native macOS or hardware test of this checkout.
+
 ## Token handling and commands
 
 Store a token in a readable regular file outside the checkout, with only the
@@ -106,15 +125,19 @@ Compile-only builds do not access Gitea and need no token:
 contacting Gitea. Inspect `SHA256SUMS`, archive members, executables and the
 binstall layout before publication.
 
-For authenticated dry runs and publication, set `TOKEN_FILE` in your shell to
-the existing token file's path; it is not a checked-in setting:
+Preview the configured matrix without a token or containers:
 
 ```console
-./release.sh "$TOKEN_FILE" --dry-run
+rust_realease . --package tiny-wb --artifact-format both --dry-run
 ```
 
-A dry run must report the correct package, version, unprefixed tag, both targets,
-asset names and public HTTPS destination without changing files, refs or releases.
+Dry-run and compile-only are separate modes. Dry-run does not build, create
+artifacts or contact the release API. For publication, set `TOKEN_FILE`
+in your shell to the existing token file's path; it is not a checked-in setting.
+
+A dry run must report the correct package, version, unprefixed tag, all four targets,
+each backend, Apple image/SDK/minimum, asset names and public HTTPS destination
+without changing files, refs or releases.
 A successful dry run is required but does not replace collision inspection.
 
 After all readiness checks and separate publication authorization:
@@ -156,13 +179,37 @@ Before publication:
    Any collision stops publication. `--replace-assets` requires inspection and
    explicit approval to replace those exact assets; replacement is not atomic.
    An existing empty release can be reused only after tag/version checks pass.
-6. Run the real wrapper dry run. Resolve every prerequisite or metadata error.
+6. Run the publisher dry run shown above. Resolve every prerequisite or metadata error.
    Repeat tag and release/asset inspection immediately before live publication.
 
 The publisher normalizes archive metadata, but this is not a bit-for-bit build
-reproducibility claim. Rust toolchains and Cross image digests are not pinned
-here, and `build.rs` embeds a Git revision. Record those inputs per release.
+reproducibility claim. Host Rust toolchains and Cross image digests are not pinned
+here (the Apple image is pinned), and `build.rs` embeds a Git revision. Record
+those inputs per release.
 Use `--recompile` if a matching publisher build cache must not be reused.
+
+## macOS migration verification on 2026-10-20
+
+With installed `rust_realease 0.1.6-rc.3`, running
+`CROSS_CONTAINER_ENGINE=podman ./release.sh --compile-only` built all four
+configured targets in 177.2 seconds. It produced eight payload files and
+`SHA256SUMS` under ignored `dist/release-4HIRgC/` for package version 0.1.4.
+All eight checksums passed an independent `sha256sum -c SHA256SUMS` check.
+The publisher validated both Apple architectures, macOS minimum 13.0, system
+dynamic dependencies, archive layout and checksums; macOS runtime was skipped.
+
+Formatting, MSRV, locked checks/tests and feature matrix, Rustdoc, Clippy,
+native release build, release/macOS wrapper tests, badge tests, shell syntax
+and changed local documentation links passed. Mock TCP tests required localhost
+listener access outside the sandbox. No Rust behavior or Cargo dependencies
+changed. ShellCheck was unavailable.
+
+The dry run printed the expected four-target plan but reported the missing
+local `0.1.4` tag (and sandbox-restricted Podman access). The compile-only run
+used Podman outside the sandbox. This does not establish publication readiness:
+tag/remote collision checks must still be completed for the chosen release.
+Native macOS execution, hardware, Jenkins and publication were not tested.
+No token was needed, and no release, tag or push was performed.
 
 ## Inspection recorded on 2026-10-04
 

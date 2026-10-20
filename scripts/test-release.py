@@ -168,11 +168,30 @@ sys.exit(int(os.environ.get("PUBLISHER_EXIT", "0")))
         self.assertEqual(config['release']['tag-prefix'], '')
         self.assertEqual(config['build']['profile'], 'release')
         self.assertTrue(config['build']['locked'])
-        self.assertEqual(config['build']['targets'], ['x86_64-unknown-linux-gnu', 'x86_64-pc-windows-gnu'])
+        self.assertEqual(config['build']['targets'], [
+            'x86_64-unknown-linux-gnu', 'x86_64-pc-windows-gnu',
+            'aarch64-apple-darwin', 'x86_64-apple-darwin'])
+        self.assertEqual(config['build']['apple'], {
+            'image': 'ghcr.io/rust-cross/cargo-zigbuild@sha256:'
+                     '9b4f6b3eb9e8f9fefb3960fe288ddba576627d66d9eff851ce7f62d2455564a5',
+            'deployment-target': '13.0',
+            'sdk-root': '/opt/MacOSX11.3.sdk'})
         self.assertEqual(manifest['metadata']['binstall'], {
             'pkg-url': '{ repo }/releases/download/{ version }/{ name }-{ target }-v{ version }.tgz',
             'pkg-fmt': 'tgz',
             'bin-dir': '{ name }-{ target }-v{ version }/{ bin }{ binary-ext }'})
+
+    def test_apple_target_overrides_are_forwarded_without_a_token(self):
+        self.env['GITEA_TOKEN'] = 'inherited-token-must-not-reach-publisher'
+        targets = ['--target', 'aarch64-apple-darwin',
+                   '--target', 'x86_64-apple-darwin']
+        self.run_wrapper(['--compile-only', *targets])
+        record = json.loads(self.capture.read_text())
+        self.assertEqual(record['args'][6:10], targets)
+        self.assertIsNone(record['token'])
+        config = tomllib.loads(record['fallback'])
+        self.assertEqual(config['build']['apple']['deployment-target'], '13.0')
+        self.assertEqual(Path(record['cross_config']), self.project / 'release' / 'Cross.toml')
 
 
 if __name__ == '__main__':

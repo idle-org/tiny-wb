@@ -1,6 +1,12 @@
 # Building macOS binaries from Linux
 
-Run from a Linux checkout with a working Podman or Docker installation:
+The [release workflow](releases.md) now builds and packages both Apple targets
+alongside Linux and Windows with `./release.sh --compile-only`. Use that workflow
+for release artifacts; it validates Mach-O files and includes them in checksums
+and cargo-binstall archives before publication.
+
+For a standalone diagnostic build, run from a Linux checkout with a working
+Podman or Docker installation:
 
 ```console
 ./scripts/build-macos.sh
@@ -55,9 +61,9 @@ Cargo downloads, compilation outputs, and Zig caches live under ignored
 mounts the checkout to compile it; use a checkout without concurrent builds
 writing into the same Apple target directory.
 
-The script only compiles. The existing [`release.sh` publisher](releases.md)
-still handles its Linux/Windows matrix; it does not package or upload these
-Apple artifacts. They have no Developer ID signature or notarization.
+The diagnostic script only compiles and does not package or upload these
+outputs. The publisher builds its own Apple artifacts in publisher-owned output
+directories. Neither workflow supplies a Developer ID signature or notarization.
 
 ## Verification
 
