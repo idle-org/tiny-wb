@@ -1,17 +1,20 @@
 //! Serial worker adapter and shared progress state for the terminal application.
 //!
-//! The worker opens the device and exports completed samples. Protocol parsing
+//! The worker opens the device, retries an unusable identity on one fresh
+//! connection, and exports completed samples. Protocol parsing
 //! and orchestration stay in the library; no core type knows about UI widgets.
 
 use crate::error::{AppError, UiError};
 use std::{
+    io::{Read, Write},
     path::PathBuf,
     sync::{Arc, Mutex, MutexGuard},
 };
 use tiny_wb::{
-    acquisition::{acquire, acquire_live, ScanEvent},
+    acquisition::{acquire, acquire_live, AcquisitionError, ScanEvent},
     config::Config,
-    connection::open_connection,
+    connection::{open_connection, ConnectionError},
+    device::DeviceError,
     export::save_csv,
     live::{TraceBuffer, TraceMode},
     protocol::Sample,
@@ -348,7 +351,36 @@ impl LiveState {
     }
 }
 
-/// Open one port, acquire through the reusable core, then export valid samples.
+/// Reopen once when complete identity replies remain empty or unrecognized.
+///
+/// Dropping the entire shell before opening again releases the port and its
+/// buffered replies. These errors occur before any acquisition settings change;
+/// transport errors and failures after configuration must never replay a scan.
+fn with_identity_reconnect<T: Read + Write, R>(
+    max_response_bytes: usize,
+    mut open: impl FnMut() -> Result<T, ConnectionError>,
+    mut operation: impl FnMut(&mut Shell<T>) -> Result<R, AcquisitionError>,
+    mut on_retry: impl FnMut(),
+) -> Result<R, AppError> {
+    let first = {
+        let mut shell = Shell::new(open()?, max_response_bytes);
+        operation(&mut shell)
+    };
+    match first {
+        Err(
+            error @ (AcquisitionError::MissingIdentity
+            | AcquisitionError::Device(DeviceError::Unknown)),
+        ) => {
+            log::warn!("instrument identification failed; reopening connection once: {error}");
+            on_retry();
+            let mut shell = Shell::new(open()?, max_response_bytes);
+            Ok(operation(&mut shell)?)
+        }
+        result => Ok(result?),
+    }
+}
+
+/// Acquire with one identity-only reconnect, then export valid samples.
 pub(crate) fn run_scan(
     state: ScanState,
     request: ScanRequest,
@@ -359,14 +391,19 @@ pub(crate) fn run_scan(
     request
         .validate()
         .map_err(tiny_wb::acquisition::AcquisitionError::from)?;
-    let port = open_connection(&config)?;
-    let mut shell = Shell::new(port, config.serial.max_response_bytes);
-    let samples = acquire(
-        &mut shell,
-        &request,
-        &config.scan,
-        &config.serial,
-        |event| state.report(event),
+    let samples = with_identity_reconnect(
+        config.serial.max_response_bytes,
+        || open_connection(&config),
+        |shell| {
+            acquire(shell, &request, &config.scan, &config.serial, |event| {
+                state.report(event)
+            })
+        },
+        || {
+            state.report(ScanEvent::Message(
+                "Reconnecting after failed identification",
+            ))
+        },
     )?;
     state.report(ScanEvent::Message("Writing CSV"));
     let filename = save_csv(&samples, &config.output)?;
@@ -393,33 +430,40 @@ pub(crate) fn run_live(
     request
         .validate()
         .map_err(tiny_wb::acquisition::AcquisitionError::from)?;
-    let port = open_connection(&config)?;
-    let mut shell = Shell::new(port, config.serial.max_response_bytes);
-    let callback_state = state.clone();
-    let output = config.output.clone();
-    acquire_live(
-        &mut shell,
-        &request,
-        &config.scan,
-        &config.serial,
-        || state.should_stop(),
-        move |samples| {
-            if let Err(error) = callback_state.publish(samples) {
-                callback_state.fail(error);
-                callback_state.request_stop();
-                return;
-            }
-            if let Some(samples) = callback_state.take_save_request() {
-                match save_csv(&samples, &output) {
-                    Ok(path) => callback_state.saved(&path),
-                    Err(error) => {
-                        callback_state.fail(error);
-                        callback_state.request_stop();
+    with_identity_reconnect(
+        config.serial.max_response_bytes,
+        || open_connection(&config),
+        |shell| {
+            acquire_live(
+                shell,
+                &request,
+                &config.scan,
+                &config.serial,
+                || state.should_stop(),
+                |samples| {
+                    if let Err(error) = state.publish(samples) {
+                        state.fail(error);
+                        state.request_stop();
+                        return;
                     }
-                }
-            }
+                    if let Some(samples) = state.take_save_request() {
+                        match save_csv(&samples, &config.output) {
+                            Ok(path) => state.saved(&path),
+                            Err(error) => {
+                                state.fail(error);
+                                state.request_stop();
+                            }
+                        }
+                    }
+                },
+                |event| state.report(event),
+            )
         },
-        |event| state.report(event),
+        || {
+            state.report(ScanEvent::Message(
+                "Reconnecting after failed identification",
+            ))
+        },
     )?;
     if let Some(error) = state.error() {
         return Err(AppError::Live(error));
@@ -435,6 +479,192 @@ pub(crate) fn run_live(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::{
+        cell::{Cell, RefCell},
+        io::{self, Cursor},
+        rc::Rc,
+    };
+
+    struct IdentitySession {
+        input: Cursor<Vec<u8>>,
+        commands: Rc<RefCell<Vec<u8>>>,
+        closed: Rc<Cell<bool>>,
+    }
+
+    impl Read for IdentitySession {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            self.input.read(buffer)
+        }
+    }
+
+    impl Write for IdentitySession {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.commands.borrow_mut().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Drop for IdentitySession {
+        fn drop(&mut self) {
+            self.closed.set(true);
+        }
+    }
+
+    #[test]
+    fn single_and_live_scans_reconnect_only_after_unusable_identity() {
+        for live in [false, true] {
+            // None also checks that a healthy first connection is never replayed.
+            for failed_reply in [None, Some(""), Some("stale startup text")] {
+                let config = Config::from_toml(
+                    "[scan]\nlegacy_pre_scan=false\n[serial]\ncommand_delay_ms=0\nsettle_delay_ms=0",
+                ).unwrap();
+                let request = ScanRequest {
+                    start_hz: 280_000_000,
+                    stop_hz: 320_000_000,
+                    points: 2,
+                    repeat: 1,
+                };
+                let closed = Rc::new(Cell::new(true));
+                let commands = [
+                    Rc::new(RefCell::new(Vec::new())),
+                    Rc::new(RefCell::new(Vec::new())),
+                ];
+                let mut opened = 0;
+                let mut retries = 0;
+                let mut open = || {
+                    assert!(
+                        closed.replace(false),
+                        "old port must close before reopening"
+                    );
+                    let input = if let Some(reply) = failed_reply.filter(|_| opened == 0) {
+                        // Extra bytes are prefetched into the first shell's buffer.
+                        // They must not leak into the fresh identity exchange.
+                        format!("ch>{reply}ch>{reply}ch>{reply}ch>{reply}ch>leftover stale bytes")
+                            .into_bytes()
+                    } else {
+                        b"ch>tinySA_v1.4-test\r\nch>tinySA\r\nch>repeat zero pause mode sweep scanraw resume\r\nch>ch>ch>128dBm\r\nch>ch>ch>ch>ch>ch>{x\0\x08x\0\x10}ch>ch>".to_vec()
+                    };
+                    let session = IdentitySession {
+                        input: Cursor::new(input),
+                        commands: commands[opened].clone(),
+                        closed: closed.clone(),
+                    };
+                    opened += 1;
+                    Ok(session)
+                };
+                let sweeps = Cell::new(0);
+                let result = with_identity_reconnect(
+                    1024,
+                    &mut open,
+                    |shell| {
+                        if live {
+                            acquire_live(
+                                shell,
+                                &request,
+                                &config.scan,
+                                &config.serial,
+                                || sweeps.get() == 1,
+                                |samples| {
+                                    assert_eq!(samples.len(), 2);
+                                    sweeps.set(sweeps.get() + 1);
+                                },
+                                |_| {},
+                            )
+                            .map(|_| ())
+                        } else {
+                            acquire(shell, &request, &config.scan, &config.serial, |_| {})
+                                .map(|samples| assert_eq!(samples.len(), 2))
+                        }
+                    },
+                    || retries += 1,
+                );
+                assert!(result.is_ok(), "{result:?}");
+                assert_eq!(opened, 1 + usize::from(failed_reply.is_some()));
+                assert_eq!(retries, usize::from(failed_reply.is_some()));
+                assert!(closed.get());
+                if failed_reply.is_some() {
+                    assert_eq!(&*commands[0].borrow(), b"version\rinfo\rversion\rinfo\r");
+                }
+                let successful = String::from_utf8(commands[opened - 1].borrow().clone()).unwrap();
+                assert_eq!(successful.matches("scanraw ").count(), 1);
+                assert!(successful.ends_with("resume\r"));
+            }
+        }
+    }
+
+    #[test]
+    fn reconnect_is_bounded_and_other_acquisition_errors_are_not_retried() {
+        for (error, expected_opens) in [
+            (AcquisitionError::MissingIdentity, 2),
+            (AcquisitionError::Device(DeviceError::Unknown), 2),
+            (AcquisitionError::Device(DeviceError::Conflicting), 1),
+            (
+                AcquisitionError::Device(DeviceError::ConflictingRevision),
+                1,
+            ),
+            (
+                AcquisitionError::Transport(io::Error::from(io::ErrorKind::TimedOut).into()),
+                1,
+            ),
+            (AcquisitionError::MissingZeroReadback { requested: 128 }, 1),
+            (
+                AcquisitionError::Protocol(tiny_wb::protocol::ProtocolError::MissingEnd),
+                1,
+            ),
+        ] {
+            let mut opened = 0;
+            let mut error = Some(error);
+            let result = with_identity_reconnect(
+                256,
+                || {
+                    opened += 1;
+                    Ok(Cursor::new(Vec::<u8>::new()))
+                },
+                |_| {
+                    Err::<(), _>(
+                        error
+                            .take()
+                            .unwrap_or(AcquisitionError::Device(DeviceError::Unknown)),
+                    )
+                },
+                || {},
+            );
+            assert!(matches!(result, Err(AppError::Acquisition(_))));
+            assert_eq!(opened, expected_opens);
+        }
+    }
+
+    #[test]
+    fn connection_open_errors_are_propagated_without_another_attempt() {
+        for fail_on in [1, 2] {
+            let mut opened = 0;
+            let mut operations = 0;
+            let result = with_identity_reconnect(
+                256,
+                || {
+                    opened += 1;
+                    if opened == fail_on {
+                        Err(ConnectionError::Tcp(io::ErrorKind::PermissionDenied.into()))
+                    } else {
+                        Ok(Cursor::new(Vec::<u8>::new()))
+                    }
+                },
+                |_| {
+                    operations += 1;
+                    Err::<(), _>(AcquisitionError::MissingIdentity)
+                },
+                || {},
+            );
+            assert!(matches!(result, Err(AppError::Connection(_))));
+            assert_eq!(opened, fail_on);
+            assert_eq!(operations, fail_on - 1);
+        }
+    }
 
     #[test]
     fn shared_progress_and_errors_are_visible_across_clones() {

@@ -23,7 +23,7 @@ widgets, port discovery, worker threads, or the application's working directory.
 | `src/live.rs` | Bounded rolling average, hold and decay calculations over explicit sweeps. |
 | `src/main.rs` | Select single/live/direct-view mode, load configuration, start diagnostics, enumerate ports when needed and manage terminal lifetime. |
 | `src/error.rs` | Application/UI boundary errors with original context. |
-| `src/scan.rs` | Open the configured connection, adapt core events to shared progress, and export successful acquisitions. |
+| `src/scan.rs` | Open the configured connection, reopen once after empty/unknown identity, adapt core events to shared progress, and export successful acquisitions. |
 | `src/ui/mod.rs` | Screen transitions, keyboard handling, worker startup and progress reconciliation. |
 | `src/ui/state.rs` | UI state, configured port/baud choices and bounded numeric input. |
 | `src/ui/view.rs` | Ratatui rendering and selection styling. |

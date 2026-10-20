@@ -124,9 +124,25 @@ the editor, Enter advances to the next screen and `q` or Escape exits.
 
 Instrument identification sends the read-only `version` and `info` queries. If
 the first complete pair is empty or cannot identify a supported family, tiny-wb
-repeats that pair once before reporting the identification error. Transport
-timeouts and incomplete prompts are not replayed on a potentially unsynchronized
-stream.
+repeats that pair once on the same connection. If both exchanges are empty or
+unrecognized, the terminal application's single-scan and live workers close the
+connection, discard their buffered replies, reopen once, and repeat identification
+automatically. The UI briefly reports `Reconnecting after failed identification`.
+A successful retry proceeds with the original settings; a second failed connection
+reports its error. This recovery occurs before scan settings are changed or CSV
+output is created.
+
+Conflicting model identities, connection-opening failures, transport timeouts,
+incomplete prompts, and failures during configuration/acquisition do not trigger
+a reconnect. This avoids replaying a scan after a possible device mutation.
+Library callers of `acquire`/`acquire_live` retain ownership of their connection
+and only get the existing same-connection identity retry.
+
+The reconnect addresses a user-reported Linux first-open failure where a manual
+retry works. Stale serial input is a possible cause, not a verified diagnosis;
+there is no new operating-system buffer purge or firmware-specific workaround.
+Regression transcripts cover this recovery, but the intermittent first-open
+hardware failure has not been reproduced locally.
 
 Large point and repeat values can produce extremely long scans. Total time also
 depends on RBW and instrument mode; the progress bar is based mainly on bytes
@@ -256,6 +272,13 @@ power-cycle/reload a preset after making the RF setup safe.
 - Check the selected COM/TTY name and user permissions.
 - Unplug/reconnect if the device was just in DFU mode; DFU and CDC serial are
   different USB personalities.
+
+### Unsupported device identity on first connection
+
+The application automatically reopens once after repeated empty or unknown
+identity replies; see [identification recovery](#scan-screen). If it still
+fails, confirm the port and instrument model. Do not assume that every unknown
+device is a tinySA. Include the final error and firmware details in a bug report.
 
 ### “No version found” or a timeout
 
