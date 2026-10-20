@@ -4,118 +4,112 @@
 ![Test status](https://assets.dandaedre.com/coverage/idle-org/tiny-wb/main/test.svg)
 ![Line coverage](https://assets.dandaedre.com/coverage/idle-org/tiny-wb/main/coverage.svg)
 
-`tiny-wb` is an interactive terminal application for acquiring a frequency
-sweep from a tinySA over its USB serial console, plotting the result, and
-exporting it as CSV. It is intended for tinySA users who want a repeatable scan
-workflow and for Rust applications that need its reusable acquisition library.
+Scan a frequency range with your **tinySA**, see the spectrum in your terminal,
+and save the measurements as CSV. Start with one scan; no configuration-file
+editing is needed.
 
-## Support status
+## Get running
 
-- tinySA Basic low and high inputs are supported through 960 MHz, subject to
-  the instrument's path limits.
-- tinySA Ultra-family detection and acquisition are implemented for the shared
-  0.1–800 MHz normal range. A detected Ultra+ ZS406 additionally supports its
-  0.1–900 MHz normal range and explicit opt-in Ultra mode through 5.4 GHz.
-- ZS407 extended mode and harmonic-mode reception remain unsupported. Hardware
-  validation proves communications and framing, not RF frequency/level accuracy.
+You need a powered tinySA Basic, Ultra or supported Ultra+, a **data-capable USB
+cable**, and access to its serial port. Close other software using the tinySA.
+For a first communications check, leave external RF sources disconnected.
+Before connecting a signal, read the [safe-operation guide](docs/tinysa-field-guide.md#safe-operation-read-before-connecting-a-signal).
 
-See the [compatibility matrix](docs/tiny-wb-operations.md#compatibility-matrix)
-and [Ultra support scope](docs/ultra-support.md) before relying on a particular
-model, range, or mode.
-
-## Requirements
-
-- Rust 1.88.0 or newer
-- For acquisition, a powered tinySA Basic, Ultra, or Ultra+ and a data-capable
-  USB cable
-- For acquisition, permission to open the instrument's serial port
-
-Do not connect an unknown RF source directly to a tinySA. Use suitable external
-attenuation for transmitters and a DC block where a DC component may be present.
-Read the [safe-operation guidance](docs/tinysa-field-guide.md#safe-operation-read-before-connecting-a-signal)
-before connecting a signal.
-
-## Build and run
-
-From the repository root:
+To build from source, install Rust **1.88 or newer**, then run:
 
 ```console
-cargo run --release
+git clone https://proxy.dandaedre.com/gitea/idle-org/tiny-wb.git
+cd tiny-wb
+cargo run --locked --release
 ```
 
-For Apple Silicon and Intel macOS binaries built from Linux, use the
-[release workflow](docs/releases.md): `./release.sh --compile-only` packages
-both macOS architectures alongside Linux and Windows. See
-[macOS requirements and validation](docs/macos.md).
+Already have the checkout? Run just the last command from its root. On Linux,
+building also requires the libudev development package and `pkg-config`; this
+checkout's linker configuration uses `lld`.
 
-Use `cargo run --release -- --live` to confirm the usual connection and scan
-settings, then display repeated complete sweeps until stopped. Number keys select
-average/hold/decay traces, `s` saves the visible buffer, and `q`, Escape, or
-Enter stops, resumes the instrument, saves once more, and exits.
+## Your first scan
 
-On Linux the serial device is commonly `/dev/ttyACM0`; on Windows it appears as
-a COM port. If the port cannot be opened, follow the
-[serial-permission guidance](docs/tiny-wb-operations.md#serial-permissions).
+1. **Connect by USB and choose the port.** On the connection screen, select your
+   tinySA's port with the arrow keys. Linux commonly uses `/dev/ttyACM0`; Windows
+   uses a COM port. On macOS, select the enumerated USB serial device. Leave the
+   baud rate at **115200** for the first attempt and press **Enter**.
+2. **Choose a small range.** Try **Start 280**, **Stop 320** (MHz), **Points 1001**,
+   and **Repeat 1**. This range uses the Basic's low input and is also within the
+   supported Ultra normal range. For a connected RF signal, use the appropriate
+   instrument input and safe signal level.
+3. **Enter the values.** **Left/Right** selects a field. Type digits for a
+   frequency or point count, then press **Enter** to apply that value. Use
+   **Up/Down** to adjust a value, including Repeat. Once all fields are set,
+   press **Enter** again to start the scan.
+4. **Read the plot.** Wait for the scan to finish. Frequency runs left to right
+   in **MHz**; level is in **dBm**. A higher point means a stronger signal.
+   The app automatically saves a `scan_*.csv` in your current directory.
 
-Use Left/Right or `h`/`l` to select a field, Up/Down or `k`/`j` to change it,
-or type digits to edit a selected start/stop frequency in MHz or the point count.
-Enter applies a typed value (press it again to advance), Backspace removes a
-digit, and Escape cancels an active edit. Otherwise Enter advances and `q` or
-Escape quits.
-A successful scan displays a trace
-and writes a collision-safe `scan_*.csv` file in the current directory. CSV
-frequencies are in MHz and levels are in dBm.
+![Scan setup with Start 280 MHz, Stop 320 MHz, 1001 points and Repeat 1](docs/images/scan-settings.png)
 
-Open an existing tiny-wb CSV directly in the interactive renderer without
-enumerating or connecting to a device:
+*Scan settings in the real application. Screenshots use the mock device; no
+physical instrument or RF source is needed to reproduce this demonstration.*
+
+![Completed simulated scan with a peak near 300 MHz and the visible-peak readout enabled](docs/images/scan-result.png)
+
+*Example result from simulated data, with **m** pressed to show the peak.
+Your real trace will depend on the signals and measurement setup.*
+
+## Explore and save
+
+| Key on the result screen | Action |
+| --- | --- |
+| `m` | Show or hide the strongest visible sample's frequency and level |
+| `+` / `-` | Zoom in / out |
+| Left / Right | Pan across the frequency range |
+| `0` | Return to the full range |
+| `r` | Repeat the same scan and save a new CSV |
+| `n` | Edit the settings for a new scan |
+| `q` | Quit |
+
+CSV columns are **frequency in MHz, level in dBm**; by default there is no
+header. Each successful scan gets a new filename. To reopen a saved scan
+without connecting a device, replace `scan.csv` with your file:
 
 ```console
-cargo run --release -- --view scan.csv
-# The shorter `cargo run --release -- scan.csv` is equivalent.
+cargo run --locked --release -- --view scan.csv
 ```
 
-On a plot, use `+`/`=` and `-` to zoom, Left/Right or `h`/`l` to pan, and
-`0` or Home to restore the full frequency range. These controls also work during
-live capture. Press `m` to toggle a box showing the strongest visible sample's
-level and frequency. Plot bindings are configurable
-under `[ui.bindings]`. After an acquired scan, `r` immediately repeats the same
-scan and `n` returns to the prefilled scan-parameter editor.
+Want repeated sweeps? Start with `cargo run --locked --release -- --live`, then
+choose the connection and range as above. In live mode, **s** saves the visible
+trace and **q** stops after the current sweep and saves it. See
+[live controls](docs/tiny-wb-operations.md#live-display) for averaging and hold modes.
 
-## Configuration and documentation
+## If something does not work
 
-The selected settings are saved to `config.toml`, or to the path in
-`TINY_WB_CONFIG`. Start with the commented [default configuration](config/default.toml)
-and consult the [configuration guide](docs/configuration.md) for validation,
-units, output, and logging settings.
+- **No port, or access denied?** Check the USB cable, close other serial software,
+  and follow the [serial-permission guide](docs/tiny-wb-operations.md#serial-permissions).
+- **Timeout or no instrument detected?** Check the selected port and power, then
+  consult [troubleshooting](docs/tiny-wb-operations.md#troubleshooting).
+- **No tinySA yet?** Follow the [mock-device walkthrough](docs/mock-device.md)
+  to try the same screens and CSV workflow with simulated data.
 
-- [Compatibility, operation, and troubleshooting](docs/tiny-wb-operations.md)
-- [Hardware validation checklist](docs/hardware-validation.md)
-- [USB console and `scanraw` protocol](docs/usb-protocol.md)
-- [Documentation index](docs/README.md)
+Settings are saved automatically in `config.toml`. See the
+[configuration guide](docs/configuration.md) for output directories, keyboard
+bindings and the `TINY_WB_CONFIG` override.
 
-## Development
+## Supported instruments and more
 
-The core protocol, transport, acquisition, and CSV code can be tested without
-a terminal or physical instrument:
+Basic low/high acquisition is supported through 960 MHz, subject to input-path
+limits. Ultra-family normal-mode support covers 0.1–800 MHz; detected Ultra+
+ZS406 devices also support 0.1–900 MHz and opt-in Ultra mode through 5.4 GHz.
+ZS407 extended mode and harmonic reception are not supported. Check the
+[compatibility matrix](docs/tiny-wb-operations.md#compatibility-matrix) and
+[Ultra support scope](docs/ultra-support.md) before choosing a wider range.
+Hardware communications checks do not establish RF accuracy.
 
-```console
-cargo fmt --all -- --check
-cargo test --locked --all-targets --all-features
-cargo clippy --locked --all-targets --all-features -- -D warnings
-```
+- [Operations and detailed controls](docs/tiny-wb-operations.md)
+- [Linux, Windows and macOS release builds](docs/releases.md)
+- [Reusable Rust library](docs/library.md)
+- [Development and verification](docs/security-and-ci.md#local-verification)
+- [Documentation index](docs/README.md) · [Contributor instructions](AGENTS.md)
 
-Run the complete local CI sequence in
-[Security, dependency policy, and MSRV](docs/security-and-ci.md#local-verification).
-See the [architecture guide](docs/architecture.md),
-[testing guide](docs/testing.md), and [contributor instructions](AGENTS.md)
-before changing behavior.
+Report bugs in the [issue tracker](https://proxy.dandaedre.com/gitea/idle-org/tiny-wb/issues)
+with the [reproduction details](docs/tiny-wb-operations.md#reproducible-bug-report-checklist).
 
-## Support
-
-Report bugs in the [project issue tracker](https://proxy.dandaedre.com/gitea/idle-org/tiny-wb/issues).
-Include the details from the
-[reproducible bug-report checklist](docs/tiny-wb-operations.md#reproducible-bug-report-checklist).
-
-## License
-
-tiny-wb is available under the [MIT License](LICENSE).
+Licensed under the [MIT License](LICENSE).
