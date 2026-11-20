@@ -16,7 +16,7 @@ pipeline {
         RUST_BACKTRACE = '1'
 
         // LTS-like compatibility floor verified by the dedicated MSRV stage.
-        MSRV = '1.88.0'
+        MSRV = '1.91.0'
 
         // Supply-chain tools are pinned for reproducible policy behavior.
         CARGO_AUDIT_VERSION = '0.22.2'

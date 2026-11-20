@@ -25,7 +25,7 @@ cable**, and access to its serial port. Close other software using the tinySA.
 For a first communications check, leave external RF sources disconnected.
 Before connecting a signal, read the [safe-operation guide](docs/tinysa-field-guide.md#safe-operation-read-before-connecting-a-signal).
 
-To build from source, install Rust **1.88 or newer**, then run:
+To build from source, install Rust **1.91 or newer**, then run:
 
 ```console
 git clone https://proxy.dandaedre.com/gitea/idle-org/tiny-wb.git

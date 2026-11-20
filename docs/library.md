@@ -1,7 +1,7 @@
 # Rust library integration
 
 The package builds both `tiny_wb` (Rust library) and `tiny-wb` (terminal app).
-Rust 1.88 or newer is required. To integrate a checkout without terminal, serial,
+Rust 1.91 or newer is required. To integrate a checkout without terminal, serial,
 libudev or Windows resource dependencies:
 
 ```toml

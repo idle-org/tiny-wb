@@ -1,7 +1,7 @@
 //! CSV serialization and collision-safe file creation, separate from decoding.
 
 use crate::{config::OutputConfig, protocol::Sample};
-use chrono::Local;
+use jiff::ZonedDateTime;
 use std::{
     fs::{self, OpenOptions},
     io::{self, BufRead, BufWriter, Write},
@@ -108,7 +108,7 @@ pub fn write_csv(
 /// Readers may see the in-progress file, so only the returned path means complete.
 pub fn save_csv(samples: &[Sample], settings: &OutputConfig) -> io::Result<PathBuf> {
     fs::create_dir_all(&settings.directory)?;
-    let stamp = Local::now().format("%Y%m%d %H_%M_%S_%6f").to_string();
+    let stamp = filename_stamp(&ZonedDateTime::now());
     for suffix in 0..100 {
         let path = settings
             .directory
@@ -135,9 +135,32 @@ pub fn save_csv(samples: &[Sample], settings: &OutputConfig) -> io::Result<PathB
     ))
 }
 
+/// Preserve the local calendar fields and six fractional digits in export names.
+fn filename_stamp(now: &ZonedDateTime) -> String {
+    now.strftime("%Y%m%d %H_%M_%S_%6f").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filename_timestamp_preserves_local_time_and_microseconds() {
+        for (input, expected) in [
+            (
+                "2024-02-29T23:59:58.123456789+05:30[+05:30]",
+                "20240229 23_59_58_123456",
+            ),
+            (
+                "2026-01-01T00:00:00.000001-04:00[-04:00]",
+                "20260101 00_00_00_000001",
+            ),
+            ("2026-01-01T00:00:00Z[UTC]", "20260101 00_00_00_000000"),
+        ] {
+            let now: ZonedDateTime = input.parse().unwrap();
+            assert_eq!(filename_stamp(&now), expected);
+        }
+    }
 
     #[test]
     fn csv_has_explicit_units_only_when_requested() {

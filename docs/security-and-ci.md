@@ -7,7 +7,7 @@ runs `cargo-audit` plus `cargo-deny`. No other hardening tools are in scope.
 ## Rust compatibility floor
 
 The declared and CI-tested minimum supported Rust version (MSRV) is
-**Rust 1.88.0**. This is an LTS-like project policy rather than an upstream Rust
+**Rust 1.91.0**. This is an LTS-like project policy rather than an upstream Rust
 LTS designation: Rust itself does not publish LTS toolchains.
 
 The application code and the former Ratatui 0.28 dependency could be made to
@@ -15,14 +15,23 @@ compile with older compilers, but that graph contained the unmaintained `paste`
 crate and `lru` releases covered by RustSec soundness advisories. Ratatui 0.30.0
 still locked an affected optional `lru` and a vulnerable `time`. Ratatui 0.30.2
 is the first tested upstream line that clears those findings, and it declares
-Rust 1.88.0. The project therefore treats 1.88.0 as the lowest supported clean
-graph rather than adding advisory exceptions or local dependency patches.
+Rust 1.88.0. That established the previous compatibility floor.
 
-`Cargo.toml` declares `rust-version = "1.88.0"`. CI installs that exact
+On 2026-11-20, [RUSTSEC-2026-0543](https://rustsec.org/advisories/RUSTSEC-2026-0543)
+required removing chrono (all versions are unmaintained). CSV export and the
+hardware-validation example now use jiff, preserving local-time filenames and
+six fractional digits. flexi_logger 0.32 removes its transitive chrono dependency
+and requires Rust 1.91.0, which is the new build and CI floor. Existing logging
+settings remain compatible; source builders must upgrade their Rust toolchain.
+The locked rustix is also updated to at least 1.1.6 for
+[RUSTSEC-2026-0486](https://rustsec.org/advisories/RUSTSEC-2026-0486).
+Neither advisory is ignored.
+
+`Cargo.toml` declares `rust-version = "1.91.0"`. CI installs that exact
 toolchain and runs:
 
 ```console
-cargo +1.88.0 check --locked --all-targets --all-features
+cargo +1.91.0 check --locked --all-targets --all-features
 ```
 
 The normal CI jobs use current stable Rust, while the MSRV job prevents source
@@ -118,7 +127,7 @@ Run from the repository root, in this order:
 cargo audit --deny warnings
 cargo deny check
 cargo fmt --all -- --check
-cargo +1.88.0 check --locked --all-targets --all-features
+cargo +1.91.0 check --locked --all-targets --all-features
 cargo check --locked --all-targets --all-features
 cargo test --locked --all-targets --all-features
 cargo test --locked --no-default-features --lib
@@ -202,7 +211,7 @@ unchanged. This corrects report scope, not test coverage. The subsequent supplie
 FreeBSD Jenkins build #7 confirmed `Final line coverage: 90.87%` and passed the
 coverage stage. That build then stopped at Clippy's `chunks_exact_to_as_chunks`
 lint; the decoder now iterates fixed-size records with `as_chunks::<3>()`,
-compatible with the declared Rust 1.88 MSRV. Its exact frame-length validation
+compatible with the then-declared Rust 1.88 MSRV. Its exact frame-length validation
 still rejects incomplete records before iteration.
 
 At checkout, CI recreates ignored `coverage/` to remove stale workspace state.

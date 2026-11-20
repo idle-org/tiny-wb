@@ -226,7 +226,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let session = arguments.output.join(format!(
         "{}-{}",
         arguments.model.name().to_ascii_lowercase(),
-        chrono::Local::now().format("%Y%m%d-%H%M%S-%6f")
+        jiff::ZonedDateTime::now().strftime("%Y%m%d-%H%M%S-%6f")
     ));
     fs::create_dir_all(&session)?;
 

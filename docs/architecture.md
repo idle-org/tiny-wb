@@ -167,7 +167,7 @@ See [configuration](configuration.md) for settings, paths and exact behavior.
 The core uses standard-library byte decoding instead of `packed_struct`, and
 buffered framing instead of a separate direct `memchr` dependency. Transitive
 `memchr` use elsewhere in the graph is unrelated. Serde/TOML handle settings;
-serialport, Ratatui, chrono, log/flexi_logger, color-eyre and thiserror retain
+serialport, Ratatui, jiff, log/flexi_logger, color-eyre and thiserror retain
 their device, presentation, timestamp and error-reporting roles.
 
 Library consumers can omit terminal and serial dependencies; see [feature selection](library.md).
