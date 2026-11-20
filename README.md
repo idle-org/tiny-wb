@@ -1,4 +1,7 @@
-# tiny-wb
+<p align="center">
+  <img src="docs/images/project-icon.png" width="96" height="96" alt="tiny-wb icon">
+</p>
+<h1 align="center">tiny-wb</h1>
 
 ![tiny-wb version](https://assets.dandaedre.com/coverage/idle-org/tiny-wb/main/version.svg)
 ![Test status](https://assets.dandaedre.com/coverage/idle-org/tiny-wb/main/test.svg)
@@ -7,6 +10,13 @@
 Scan a frequency range with your **tinySA**, see the spectrum in your terminal,
 and save the measurements as CSV. Start with one scan; no configuration-file
 editing is needed.
+
+## Open source and development
+
+tiny-wb is open-source software under the [MIT license](LICENSE). Its
+development includes LLM-generated or LLM-assisted work, with human review.
+It is used in professional settings; supported workflows and current
+limitations are documented in this repository.
 
 ## Get running
 
