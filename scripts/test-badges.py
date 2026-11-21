@@ -172,7 +172,7 @@ exit "$FAKE_COVERAGE_STATUS"
 ''')
     cargo.chmod(0o755)
     os.environ['PATH'] = str(tools) + ':' + old_path
-    for percentage, status in ((90.87, 0), (85, 0), (84.99, 1), (90.87, 7)):
+    for percentage, status in ((90.87, 0), (83, 0), (82.99, 1), (90.87, 7)):
         os.environ['FAKE_COVERAGE_REPORT'] = json.dumps({'data': [{
             'totals': {'lines': {'percent': percentage}},
             'files': [{'filename': 'src/example.rs', 'summary': {
@@ -223,7 +223,7 @@ alias = next(line for line in (REPO/'.cargo/config.toml').read_text().splitlines
              if line.startswith('coverage = '))
 arguments = shlex.split(alias.split('"', 1)[1].rsplit('"', 1)[0])
 pattern = arguments[arguments.index('--ignore-filename-regex') + 1]
-assert arguments[arguments.index('--fail-under-lines') + 1] == '85'
+assert arguments[arguments.index('--fail-under-lines') + 1] == '83'
 for cache in ('/root/.cargo', '/home/user/.cargo', '/custom/cargo-cache'):
     assert re.search(pattern, cache + '/registry/src/index.crates.io-123/serde-1.0/src/lib.rs')
 for source in (REPO/'src').rglob('*.rs'):

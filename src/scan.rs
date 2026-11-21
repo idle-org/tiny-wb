@@ -483,7 +483,15 @@ mod tests {
     use std::{
         cell::{Cell, RefCell},
         io::{self, Cursor},
+        net::TcpListener,
         rc::Rc,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    use tiny_wb::{
+        config::Backend,
+        mock::{serve_connection, MockConfig},
     };
 
     struct IdentitySession {
@@ -733,5 +741,88 @@ mod tests {
         assert!(state.take_save_request().is_none());
         state.request_stop();
         assert!(state.should_stop());
+    }
+
+    fn mock_tcp_config(output_name: &str) -> (Config, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut config = Config::default();
+        config.connection.backend = Backend::Tcp;
+        config.connection.tcp_address = listener.local_addr().unwrap().to_string();
+        config.serial.command_delay_ms = 0;
+        config.serial.settle_delay_ms = 0;
+        config.serial.scan_delay_ms = 0;
+        config.scan.legacy_pre_scan = false;
+        config.output.directory =
+            std::env::temp_dir().join(format!("tiny-wb-{output_name}-{}", std::process::id()));
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            serve_connection(socket, MockConfig::default()).unwrap();
+        });
+        (config, server)
+    }
+
+    fn mock_request() -> ScanRequest {
+        ScanRequest {
+            start_hz: 240_000_000,
+            stop_hz: 360_000_000,
+            points: 4,
+            repeat: 1,
+        }
+    }
+
+    #[test]
+    fn scan_worker_acquires_exports_and_publishes_completion() {
+        let (config, server) = mock_tcp_config("scan-worker");
+        let output = config.output.directory.clone();
+        let state = ScanState::default();
+
+        run_scan(state.clone(), mock_request(), config).unwrap();
+
+        assert_eq!(state.status(), ScanStatus::Complete);
+        assert_eq!(state.progress(), 100);
+        assert_eq!(state.take_samples().unwrap().len(), 4);
+        assert!(state.message().starts_with("Saved "));
+        server.join().unwrap();
+        std::fs::remove_dir_all(output).unwrap();
+    }
+
+    #[test]
+    fn live_worker_honors_deferred_save_and_graceful_stop() {
+        let (config, server) = mock_tcp_config("live-worker");
+        let output = config.output.directory.clone();
+        let state = LiveState::default();
+        state.begin();
+        state.report(ScanEvent::InstrumentInfo("mock identity".into()));
+        assert_eq!(state.info(), "mock identity");
+        state.request_save();
+
+        let controller = state.clone();
+        let stop = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while controller.snapshot_after(0).is_none() {
+                assert!(
+                    Instant::now() < deadline,
+                    "live worker produced no snapshot"
+                );
+                thread::yield_now();
+            }
+            controller.request_stop();
+        });
+
+        run_live(state.clone(), mock_request(), config).unwrap();
+
+        stop.join().unwrap();
+        server.join().unwrap();
+        assert_eq!(state.status(), ScanStatus::Complete);
+        assert!(state.error().is_none());
+        assert!(state.message().contains("stopped live capture"));
+        assert!(std::fs::read_dir(&output).unwrap().count() >= 2);
+        std::fs::remove_dir_all(output).unwrap();
     }
 }
