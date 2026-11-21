@@ -172,7 +172,7 @@ exit "$FAKE_COVERAGE_STATUS"
 ''')
     cargo.chmod(0o755)
     os.environ['PATH'] = str(tools) + ':' + old_path
-    for percentage, status in ((90.87, 0), (83, 0), (82.99, 1), (90.87, 7)):
+    for percentage, status in ((91.49, 0), (85, 0), (84.99, 1), (91.49, 7)):
         os.environ['FAKE_COVERAGE_REPORT'] = json.dumps({'data': [{
             'totals': {'lines': {'percent': percentage}},
             'files': [{'filename': 'src/example.rs', 'summary': {
@@ -223,7 +223,7 @@ alias = next(line for line in (REPO/'.cargo/config.toml').read_text().splitlines
              if line.startswith('coverage = '))
 arguments = shlex.split(alias.split('"', 1)[1].rsplit('"', 1)[0])
 pattern = arguments[arguments.index('--ignore-filename-regex') + 1]
-assert arguments[arguments.index('--fail-under-lines') + 1] == '83'
+assert arguments[arguments.index('--fail-under-lines') + 1] == '85'
 for cache in ('/root/.cargo', '/home/user/.cargo', '/custom/cargo-cache'):
     assert re.search(pattern, cache + '/registry/src/index.crates.io-123/serde-1.0/src/lib.rs')
 for source in (REPO/'src').rglob('*.rs'):
@@ -233,6 +233,7 @@ readme = (REPO/'README.md').read_text()
 for name in ('version', 'test', 'coverage'):
     assert readme.count(f'https://assets.dandaedre.com/coverage/idle-org/tiny-wb/main/{name}.svg') == 1
 pipeline = (REPO/'Jenkinsfile').read_text()
+assert "CARGO_LLVM_COV_VERSION = '0.9.1'" in pipeline
 assert "artifacts: 'coverage/version.svg,coverage/test.svg,coverage/coverage.svg'" in pipeline
 assert 'fingerprint: true, allowEmptyArchive: false' in pipeline
 print('Badge rendering, XML, validation, coverage diagnostics, publication, README and archive checks passed.')

@@ -9,7 +9,7 @@ trap 'exit 1' HUP INT TERM
 rm -f "$summary"
 coverage_status=0
 cargo coverage >"$log" 2>&1 || coverage_status=$?
-# cargo-llvm-cov 0.6.16 can fail the floor silently after writing its report.
+# Preserve the explicit status check even when Cargo writes a valid report.
 # Print the measurement before cleanup, but never mask a failed Cargo run.
 if [ ! -s "$summary" ]; then
     echo "ERROR: cargo coverage produced no summary (exit $coverage_status); see coverage/coverage.log." >&2

@@ -21,7 +21,7 @@ pipeline {
         // Supply-chain tools are pinned for reproducible policy behavior.
         CARGO_AUDIT_VERSION = '0.22.2'
         CARGO_DENY_VERSION = '0.20.2'
-        CARGO_LLVM_COV_VERSION = '0.6.16'
+        CARGO_LLVM_COV_VERSION = '0.9.1'
         BADGE_ROOT = '/mnt/assets/coverage'
         BADGE_OWNER = 'idle-org'
         BADGE_PROJECT = 'tiny-wb'
